@@ -45,12 +45,16 @@ struct SectionBookmark {
 
 /// A blank page a Save As will add, after 1-based page `after`, as large as
 /// that page shows.
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PdfPaddingSheet {
     pub(super) after: usize,
     pub(super) width: f32,
     pub(super) height: f32,
+    /// Present when this session's page numbers count and show numbers on
+    /// blank pages, so the viewer and print show the label Save As will stamp.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) page_number: Option<PaddingPageNumber>,
 }
 
 /// One file of a document, as the sidebar's tree shows it: bookmarks numbered
@@ -406,8 +410,8 @@ impl PdfiumEngine {
             .as_mut()
             .ok_or("this document has no files to lay out")?
             .options = options;
-        // No page changed, but the compress basis holds the blanks and bookmarks.
-        entry.compress_cache = None;
+        // No page changed, but padding blanks affect compress and page numbers.
+        entry.content_changed();
 
         Ok(structure_update(entry))
     }
@@ -457,6 +461,15 @@ impl OpenDocument {
         Some((padding, nodes))
     }
 
+    /// 0-based page indices a Save As inserts a padding blank after.
+    pub(super) fn padding_indices(&self) -> Vec<usize> {
+        self.sections
+            .as_ref()
+            .filter(|_| self.combined())
+            .map(|book| book.padding(&self.page_ids))
+            .unwrap_or_default()
+    }
+
     /// The blank pages a Save As will add, each after the 1-based page it
     /// follows and sized as that page shows; what the viewer and print show.
     pub(super) fn padding_sheets(&self) -> Vec<PdfPaddingSheet> {
@@ -467,17 +480,22 @@ impl OpenDocument {
         book.padding(&self.page_ids)
             .into_iter()
             .map(|after| {
-                let page = self
-                    .page_ids
-                    .get(after)
-                    .and_then(|page_id| self.page_geometry.get(page_id))
+                let page_id = self.page_ids.get(after).copied();
+                let page = page_id
+                    .and_then(|page_id| self.page_geometry.get(&page_id))
                     .copied()
                     .unwrap_or(UNMEASURED_PAGE);
+                let page_number = page_id.and_then(|page_id| {
+                    self.owned_content
+                        .as_ref()
+                        .and_then(|state| state.padding_numbers.get(&page_id).cloned())
+                });
 
                 PdfPaddingSheet {
                     after: after + 1,
                     width: page.width,
                     height: page.height,
+                    page_number,
                 }
             })
             .collect()

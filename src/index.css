@@ -262,77 +262,31 @@ body {
 
 /* Native materials sit beneath the WebView and show only through the docked
    sidebar: every other surface paints over them, an overlaid sidebar too, which
-   lies over pages rather than over the desktop. Screen-only so printing keeps
-   its white paper ground. */
-@media screen {
-  .native-workspace,
-  .native-workspace body,
-  .native-workspace .app-surface {
-    background-color: transparent;
-  }
-
-  .native-workspace .app-sidebar[data-sidebar-mode="docked"] {
-    background-color: color-mix(in oklab, var(--sidebar) 45%, transparent);
-    /* The modal backdrop's fade. */
-    transition: background-color 100ms;
-  }
-
-  /* A modal's backdrop blurs a copy of what lies beneath and draws it over the
-     original; over the desktop that copy is as see-through as the sidebar, and
-     the sidebar's sharp words would show through it. */
-  .native-workspace[data-modal-open] .app-sidebar[data-sidebar-mode="docked"] {
-    background-color: var(--sidebar);
-  }
+   lies over pages rather than over the desktop. */
+.native-workspace,
+.native-workspace body,
+.native-workspace .app-surface {
+  background-color: transparent;
 }
 
-/* Off screen, where the app itself is the document; print media below is the
-   one place these page images are ever shown. */
-[data-print-sheet] {
-  display: none;
+.native-workspace .app-sidebar[data-sidebar-mode="docked"] {
+  background-color: color-mix(in oklab, var(--sidebar) 45%, transparent);
+  /* The modal backdrop's fade. */
+  transition: background-color 100ms;
 }
 
+/* A modal's backdrop blurs a copy of what lies beneath and draws it over the
+   original; over the desktop that copy is as see-through as the sidebar, and
+   the sidebar's sharp words would show through it. */
+.native-workspace[data-modal-open] .app-sidebar[data-sidebar-mode="docked"] {
+  background-color: var(--sidebar);
+}
+
+/* Printing is not offered; hide app chrome if an OS or WebView path still
+   triggers native printing. */
 @media print {
-  /* The page area, not the window: the sheet takes its height from here. */
-  html,
-  body {
-    height: 100%;
-    overflow: visible;
-    background: #fff;
-  }
-
-  body > *:not([data-print-sheet]) {
+  body > * {
     display: none !important;
-  }
-
-  [data-print-sheet] {
-    display: block;
-    height: 100%;
-  }
-
-  /* Tighter than the 0.5in a WebView would otherwise take, and still clear of
-     the margin no printer can reach. */
-  @page {
-    margin: 5mm;
-  }
-
-  /* One page per sheet. */
-  .pdf-print-page {
-    position: relative;
-    height: 100%;
-    overflow: hidden;
-    break-after: page;
-  }
-
-  .pdf-print-page:last-child {
-    break-after: auto;
-  }
-
-  .pdf-print-page img {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
   }
 }
 

@@ -1,13 +1,4 @@
-import {
-  ChevronDown,
-  FileImage,
-  RectangleVertical,
-  Save,
-  Scissors,
-  Search,
-  Shrink,
-  Upload,
-} from "lucide-react"
+import { Save, Search, Upload } from "lucide-react"
 import { useRef, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -19,19 +10,11 @@ import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { WindowControls } from "@/components/WindowControls"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuShortcut,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Toggle } from "@/components/ui/toggle"
 import type { useAnnotations } from "@/hooks/useAnnotations"
 import { useSidebar } from "@/hooks/useSidebar"
 import type { HexColor, RectStyle } from "@/lib/annotations"
-import { formatShortcut, shortcuts } from "@/lib/shortcuts"
-import { splitMenuButtonClassName } from "@/lib/toolbarStyles"
+import { shortcuts } from "@/lib/shortcuts"
 import { cn } from "@/lib/utils"
 
 type SessionHeaderProps = {
@@ -40,21 +23,17 @@ type SessionHeaderProps = {
   appMenu: ReactNode
   canSave: boolean
   macOS: boolean
-  onCompress: () => void
-  onSaveA4: () => void
-  onExportImages: () => void
   onSave: () => void
   onSaveAs: () => void
   onSearchClose: () => void
   onSearchOpen: () => void
-  onSplit: () => void
   onToolChange: (tool: AnnotationTool) => void
   onRedo: () => void
   onUndo: () => void
   saveLabel: string
-  /** A document with no file of its own, or one other files were added to,
-      saves only to a new file: its save button is Save As itself, its key
-      with it. */
+  /** A document that cannot overwrite its own file — sourceless, combined,
+      watermarked/numbered, or an edited signed file — switches the save button
+      and its shortcut automatically to Save As. */
   saveAsOnly: boolean
   searchOpen: boolean
   tool: {
@@ -78,14 +57,10 @@ export function SessionHeader({
   appMenu,
   canSave,
   macOS,
-  onCompress,
-  onSaveA4,
-  onExportImages,
   onSave,
   onSaveAs,
   onSearchClose,
   onSearchOpen,
-  onSplit,
   onToolChange,
   onRedo,
   onUndo,
@@ -140,14 +115,12 @@ export function SessionHeader({
                 <Search />
               </Toggle>
             </ToolbarTooltip>
-            {/* The outline variant's dark: border outranks a plain border-r override. */}
             <ToolbarTooltip
               label={saveLabel}
               shortcut={saveAsOnly || canSave ? shortcuts.save : undefined}
             >
               <Button
                 aria-label={saveAsOnly ? t("menu.saveAs") : t("annotate.save")}
-                className="border-r-transparent peer/save dark:border-r-transparent"
                 data-save-as-only={saveAsOnly ? "" : undefined}
                 data-slot="pdf-save-trigger"
                 disabled={!saveAsOnly && !canSave}
@@ -158,54 +131,6 @@ export function SessionHeader({
                 {saveAsOnly ? <Upload /> : <Save />}
               </Button>
             </ToolbarTooltip>
-            <DropdownMenu>
-              <ToolbarTooltip label={t("toolbar.saveAsMenu")}>
-                <DropdownMenuTrigger
-                  render={
-                    <Button
-                      aria-label={t("toolbar.saveAsMenu")}
-                      className={cn(
-                        splitMenuButtonClassName,
-                        "peer-enabled/save:peer-hover/save:before:opacity-100",
-                      )}
-                      data-slot="pdf-save-menu-trigger"
-                      size="icon-sm"
-                      variant="outline"
-                    />
-                  }
-                >
-                  <ChevronDown className="size-3" />
-                </DropdownMenuTrigger>
-              </ToolbarTooltip>
-              <DropdownMenuContent
-                align="end"
-                className="w-auto min-w-56 [&_[data-slot=dropdown-menu-shortcut]]:pl-6"
-              >
-                <DropdownMenuItem data-action="save-as" onClick={onSaveAs}>
-                  <Upload />
-                  {t("menu.saveAs")}
-                  <DropdownMenuShortcut>
-                    {formatShortcut(shortcuts.saveAs)}
-                  </DropdownMenuShortcut>
-                </DropdownMenuItem>
-                <DropdownMenuItem data-action="save-a4" onClick={onSaveA4}>
-                  <RectangleVertical />
-                  {t("a4Export.menuLabel")}
-                </DropdownMenuItem>
-                <DropdownMenuItem data-action="export-images" onClick={onExportImages}>
-                  <FileImage />
-                  {t("imageExport.menuLabel")}
-                </DropdownMenuItem>
-                <DropdownMenuItem data-action="split" onClick={onSplit}>
-                  <Scissors />
-                  {t("splitExport.menuLabel")}
-                </DropdownMenuItem>
-                <DropdownMenuItem data-action="compress" onClick={onCompress}>
-                  <Shrink />
-                  {t("compressExport.menuLabel")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
           </ButtonGroup>
         </>
       }

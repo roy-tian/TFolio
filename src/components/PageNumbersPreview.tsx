@@ -111,28 +111,46 @@ export function PageNumbersPreview({
   placement,
   printed,
 }: PageNumbersPreviewProps) {
-  if (placement === "auto") {
-    return (
-      <div className="flex flex-col gap-3" data-testid="page-numbers-preview">
-        <Sheet
-          anchor="right"
-          caption={captions.odd}
-          printed={printed}
-          testId="page-numbers-sample"
-        />
-        <Sheet anchor="left" caption={captions.even} printed={printed + 1} />
-      </div>
-    )
-  }
+  const auto = placement === "auto"
 
   return (
-    <div className="flex flex-col gap-3" data-testid="page-numbers-preview">
-      <Sheet
-        anchor={placement === "bottomRight" ? "right" : "center"}
-        caption={captions.every}
-        printed={printed}
-        testId="page-numbers-sample"
-      />
+    // Share one grid cell with an invisible mirrored pair in fixed placements
+    // so switching never resizes the dialog, while keeping hidden captions out
+    // of the preview element whose `textContent` e2e inspects.
+    <div className="grid grid-cols-1">
+      {auto ? null : (
+        <div
+          aria-hidden="true"
+          className="invisible col-start-1 row-start-1 flex flex-col gap-3"
+        >
+          <Sheet anchor="right" caption={captions.odd} printed={printed} />
+          <Sheet anchor="left" caption={captions.even} printed={printed + 1} />
+        </div>
+      )}
+
+      <div
+        className="col-start-1 row-start-1 flex flex-col gap-3"
+        data-testid="page-numbers-preview"
+      >
+        {auto ? (
+          <>
+            <Sheet
+              anchor="right"
+              caption={captions.odd}
+              printed={printed}
+              testId="page-numbers-sample"
+            />
+            <Sheet anchor="left" caption={captions.even} printed={printed + 1} />
+          </>
+        ) : (
+          <Sheet
+            anchor={placement === "bottomRight" ? "right" : "center"}
+            caption={captions.every}
+            printed={printed}
+            testId="page-numbers-sample"
+          />
+        )}
+      </div>
     </div>
   )
 }

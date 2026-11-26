@@ -24,6 +24,46 @@ pub(super) fn unrotated_page_size(page: &PdfPage<'_>) -> (f32, f32) {
     }
 }
 
+fn normalize_rect(rect: PdfRect) -> (f32, f32, f32, f32) {
+    (
+        rect.left().value.min(rect.right().value),
+        rect.bottom().value.min(rect.top().value),
+        rect.left().value.max(rect.right().value),
+        rect.bottom().value.max(rect.top().value),
+    )
+}
+
+fn intersect_page_boxes(
+    media: Option<PdfRect>,
+    crop: Option<PdfRect>,
+) -> Option<(f32, f32, f32, f32)> {
+    // Intersect in plain scalars: `PdfRect::new_from_values` swaps inverted
+    // bounds, which would turn a disjoint intersection into the gap between them.
+    let (left, bottom, right, top) = match (media.map(normalize_rect), crop.map(normalize_rect)) {
+        (Some(media), Some(crop)) => (
+            media.0.max(crop.0),
+            media.1.max(crop.1),
+            media.2.min(crop.2),
+            media.3.min(crop.3),
+        ),
+        (Some(box_), None) | (None, Some(box_)) => box_,
+        (None, None) => return None,
+    };
+
+    (right > left && top > bottom).then_some((left, bottom, right - left, top - bottom))
+}
+
+/// The visible page box `(left, bottom, width, height)` in unrotated user
+/// space: the intersection of `/CropBox` and `/MediaBox` when both exist, so
+/// objects placed relative to it stay inside cropped pages.
+pub(super) fn visible_unrotated_box(page: &PdfPage<'_>) -> (f32, f32, f32, f32) {
+    let (fallback_width, fallback_height) = unrotated_page_size(page);
+    let media = page.boundaries().media().ok().map(|box_| box_.bounds);
+    let crop = page.boundaries().crop().ok().map(|box_| box_.bounds);
+
+    intersect_page_boxes(media, crop).unwrap_or((0.0, 0.0, fallback_width, fallback_height))
+}
+
 /// Held here rather than `PdfPagePaperSize::a4()` so the placement arithmetic
 /// stays pure and testable without PDFium loaded.
 pub(super) const A4_SHORT_POINTS: f32 = 595.276;
@@ -292,5 +332,24 @@ mod tests {
             255
         );
         assert!(annotation_color("nope", 0.4).is_err());
+    }
+
+    #[test]
+    fn normalizes_reversed_page_boxes_before_intersecting() {
+        // PDF boxes may specify opposite corners in either order (`[urx ury llx lly]`).
+        let media = PdfRect::new_from_values(800.0, 600.0, 0.0, 0.0);
+        let crop = PdfRect::new_from_values(700.0, 500.0, 100.0, 50.0);
+
+        assert_eq!(
+            intersect_page_boxes(Some(media), Some(crop)),
+            Some((50.0, 100.0, 450.0, 600.0))
+        );
+        assert_eq!(
+            intersect_page_boxes(Some(media), None),
+            Some((0.0, 0.0, 600.0, 800.0))
+        );
+        // Disjoint boxes collapse to nothing so callers fall back to page size.
+        let disjoint = PdfRect::new_from_values(900.0, 700.0, 1000.0, 800.0);
+        assert_eq!(intersect_page_boxes(Some(media), Some(disjoint)), None);
     }
 }

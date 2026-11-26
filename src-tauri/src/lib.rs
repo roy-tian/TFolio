@@ -20,17 +20,17 @@ use pdfium::{
     decide_pdf_signatures, delete_pdf_annotations, delete_pdf_pages, discard_pdf_stashes,
     download_pdf_note_font, duplicate_pdf_pages, estimate_pdf_compression, export_compressed_pdf,
     export_pdf, export_pdf_archive, extract_pdf_page_plain_text, extract_pdf_page_text,
-    extract_pdf_pages, flatten_pdf_signatures, insert_pdf_blank_page, insert_pdf_files,
+    extract_pdf_pages, fit_a4_pdf, flatten_pdf_signatures, insert_pdf_blank_page, insert_pdf_files,
     insert_pdf_pages_from_document, merge_pdf_sources, open_converted_from_path, open_pdf,
     open_pdf_from_path, pdf_annotation_at_point, pdf_file_changed, pdf_text_note_font,
     pick_pdf_path, pick_pdf_paths, read_pdf_sources, release_pdf_compression, release_pdf_sources,
     remove_pdf_page_numbers, remove_pdf_watermark, rename_pdf_section, render_pdf_page,
-    render_pdf_page_thumbnail, render_pdf_watermark_preview, reorder_pdf_pages, restore_pdf_pages,
-    rotate_pdf_pages, save_a4_pdf, save_pdf, search_pdf_text, set_pdf_file_options, source_sizes,
-    word_conversion_available, PdfiumState,
+    render_pdf_page_thumbnail, render_pdf_watermark_preview, reorder_pdf_pages,
+    restore_pdf_page_numbers, restore_pdf_pages, rotate_pdf_pages, save_pdf, search_pdf_text,
+    set_pdf_file_options, source_sizes, word_conversion_available, PdfiumState,
 };
 #[cfg(feature = "e2e")]
-use pdfium::{export_pdf_to, save_a4_pdf_to, unload_pdf_sources};
+use pdfium::{export_pdf_to, unload_pdf_sources};
 use quit::quit_app;
 use recent::{
     recent_pdf_view, recent_pdfs, remove_recent_pdf, reveal_recent_pdf, set_recent_pdf_view,
@@ -40,7 +40,7 @@ use settings::{set_settings, settings};
 use tauri::Manager;
 use update::{check_updates, download_update, install_update, update_status, UpdateState};
 use window_state::WindowState;
-use windows::{find_open_file, open_new_window, print_window, AppWindows, DocumentOwners};
+use windows::{find_open_file, open_new_window, AppWindows, DocumentOwners};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -157,9 +157,7 @@ pub fn run() {
             pick_pdf_paths,
             read_pdf_sources,
             source_sizes,
-            save_a4_pdf,
-            #[cfg(feature = "e2e")]
-            save_a4_pdf_to,
+            fit_a4_pdf,
             recent_pdfs,
             recent_pdf_view,
             set_recent_pdf_view,
@@ -184,6 +182,7 @@ pub fn run() {
             remove_pdf_watermark,
             apply_pdf_page_numbers,
             remove_pdf_page_numbers,
+            restore_pdf_page_numbers,
             cancel_pdf_operation,
             cancel_word_conversion,
             cancel_word_open,
@@ -196,7 +195,6 @@ pub fn run() {
             install_update,
             take_launch_files,
             open_new_window,
-            print_window,
             quit_app,
             find_open_file,
             move_document,

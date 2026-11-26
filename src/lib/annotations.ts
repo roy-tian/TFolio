@@ -828,6 +828,24 @@ export function pageNumbersConfig(
   return null
 }
 
+/** Whether an edit that can change page numbering, blank detection, padding,
+    or smart colour landed since the last page-number command. */
+function pageNumbersStale(history: AnnotationHistory): boolean {
+  for (let index = history.past.length - 1; index >= 0; index -= 1) {
+    const { kind } = history.past[index]!.command
+
+    if (kind === "pageNumbers") {
+      return false
+    }
+
+    if (kind !== "renameSection" && kind !== "watermark") {
+      return true
+    }
+  }
+
+  return false
+}
+
 export function planPageNumbersChange(
   history: AnnotationHistory,
   config: PageNumbersConfig | null,
@@ -835,7 +853,10 @@ export function planPageNumbersChange(
 ) {
   const previous = pageNumbersConfig(history)
 
-  if (samePageNumbersConfig(previous, config)) {
+  if (
+    samePageNumbersConfig(previous, config) &&
+    (config === null || !pageNumbersStale(history))
+  ) {
     return null
   }
 

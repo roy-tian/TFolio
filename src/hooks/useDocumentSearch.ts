@@ -309,6 +309,9 @@ export function useDocumentSearch({
         )
 
         if (offset) {
+          // Restart or restore the jump's arrival window if rendering/text
+          // extraction delayed the scroll past JUMP_ARRIVAL_MS.
+          currentPage.reland(match.pageNumber)
           viewer.scrollTo({
             behavior: "smooth",
             left: viewer.scrollLeft + offset.left,

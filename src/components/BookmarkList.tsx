@@ -1,4 +1,4 @@
-import { useRef } from "react"
+import { useCallback, useMemo, useRef } from "react"
 import { Bookmark, ChevronRight } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
@@ -6,7 +6,10 @@ import { HintTooltip } from "@/components/HintTooltip"
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import { SidebarDropEdge } from "@/components/SidebarFileDrop"
 import { OutlineBar } from "@/components/SidebarPanelTools"
+import { useCurrentPageSelector, type CurrentPage } from "@/hooks/useCurrentPage"
+import { useFollowOutlineRow } from "@/hooks/useFollowCurrentPage"
 import {
+  activeBookmarkKey,
   bookmarkFoldKey,
   DOCUMENT_OUTLINE_KEY,
   foldableBookmarks,
@@ -19,6 +22,7 @@ import type { PdfOutlineItem } from "@/lib/pdf"
 import { cn } from "@/lib/utils"
 
 type BookmarkItemsProps = {
+  activeKey?: string | null
   folds: OutlineFolds
   items: PdfOutlineItem[]
   onFoldsChange: (folds: OutlineFolds) => void
@@ -30,6 +34,7 @@ type BookmarkItemsProps = {
 
 /** The `li`s of one level, for a `ul` the caller owns. */
 export function BookmarkItems({
+  activeKey = null,
   folds,
   items,
   onFoldsChange,
@@ -44,6 +49,7 @@ export function BookmarkItems({
     const title = item.title.trim() || t("bookmarks.untitled")
     const nested = item.items.length > 0
     const open = nested && !folds.has(itemKey)
+    const isActive = itemKey === activeKey
 
     return (
       <li key={itemKey}>
@@ -51,7 +57,9 @@ export function BookmarkItems({
           className={cn(
             "flex items-center rounded-md transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
             tree && "gap-1",
+            isActive && "bg-sidebar-accent font-medium text-sidebar-accent-foreground",
           )}
+          data-outline-current={isActive ? "" : undefined}
         >
           {tree ? (
             nested ? (
@@ -76,6 +84,7 @@ export function BookmarkItems({
               column this narrow has nowhere to be read inside it. */}
           <HintTooltip label={title} side="right">
             <button
+              aria-current={isActive ? "location" : undefined}
               className={cn(
                 "flex min-w-0 flex-1 items-center gap-2 rounded-md py-1.5 pr-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring disabled:cursor-default disabled:opacity-50",
                 !tree && "pl-2",
@@ -84,7 +93,12 @@ export function BookmarkItems({
               onClick={() => item.pageNumber && onNavigate(item.pageNumber)}
               type="button"
             >
-              <Bookmark className="size-3.5 shrink-0 text-muted-foreground" />
+              <Bookmark
+                className={cn(
+                  "size-3.5 shrink-0 text-muted-foreground",
+                  isActive && "text-primary",
+                )}
+              />
               <span className="truncate">{title}</span>
             </button>
           </HintTooltip>
@@ -92,6 +106,7 @@ export function BookmarkItems({
         {open ? (
           <ul className="pl-5">
             <BookmarkItems
+              activeKey={activeKey}
               folds={folds}
               items={item.items}
               onFoldsChange={onFoldsChange}
@@ -107,6 +122,8 @@ export function BookmarkItems({
 }
 
 type BookmarkListProps = {
+  active: boolean
+  currentPage: CurrentPage
   folds: OutlineFolds
   items: PdfOutlineItem[]
   onFoldsChange: (folds: OutlineFolds) => void
@@ -116,6 +133,8 @@ type BookmarkListProps = {
 }
 
 export function BookmarkList({
+  active,
+  currentPage,
   folds,
   items,
   onFoldsChange,
@@ -124,13 +143,32 @@ export function BookmarkList({
 }: BookmarkListProps) {
   const { t } = useTranslation()
   const navRef = useRef<HTMLElement>(null)
-  const foldAll = foldAllOf(
-    folds,
-    items.flatMap((item, index) =>
-      item.items.length > 0 ? [bookmarkFoldKey(rootKey, index)] : [],
-    ),
-    foldableBookmarks(items, rootKey),
+  const keyForPage = useCallback(
+    (pageNumber: number) =>
+      items.length === 0 ? null : activeBookmarkKey(items, rootKey, pageNumber, folds),
+    [folds, items, rootKey],
   )
+  const activeKey = useCurrentPageSelector(currentPage, keyForPage)
+  const foldAll = useMemo(
+    () =>
+      foldAllOf(
+        folds,
+        items.flatMap((item, index) =>
+          item.items.length > 0 ? [bookmarkFoldKey(rootKey, index)] : [],
+        ),
+        foldableBookmarks(items, rootKey),
+      ),
+    [folds, items, rootKey],
+  )
+  const tree = useMemo(() => nestsBookmarks(items), [items])
+
+  useFollowOutlineRow({
+    active,
+    activeKey,
+    currentPage,
+    keyForPage,
+    navRef,
+  })
 
   return (
     <div className="flex h-full flex-col">
@@ -157,12 +195,13 @@ export function BookmarkList({
           ) : (
             <ul>
               <BookmarkItems
+                activeKey={activeKey}
                 folds={folds}
                 items={items}
                 onFoldsChange={onFoldsChange}
                 onNavigate={onNavigate}
                 parentKey={rootKey}
-                tree={nestsBookmarks(items)}
+                tree={tree}
               />
             </ul>
           )}

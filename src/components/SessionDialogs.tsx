@@ -1,10 +1,7 @@
 import { PageNumbersDialog } from "@/components/PageNumbersDialog"
-import { PrintDialog } from "@/components/PrintDialog"
-import { PrintSheet } from "@/components/PrintSheet"
 import { WatermarkDialog } from "@/components/WatermarkDialog"
 import type { DocumentWatermarkPreviewProps } from "@/components/DocumentWatermarkPreview"
 import type { usePageNumbers } from "@/hooks/usePageNumbers"
-import type { usePrint } from "@/hooks/usePrint"
 import type { useWatermark } from "@/hooks/useWatermark"
 
 type SessionDialogsProps = {
@@ -14,18 +11,15 @@ type SessionDialogsProps = {
   pageCount: number
   pageNumbers: ReturnType<typeof usePageNumbers>
   watermarkPreview: Omit<DocumentWatermarkPreviewProps, "config">
-  print: ReturnType<typeof usePrint>
   watermark: ReturnType<typeof useWatermark>
 }
 
-/** The session's modal surfaces: the two owned-layer dialogs, the print
-    progress dialog, and the sheet that stands in while pages print. */
+/** The session's modal surfaces: the two owned-layer dialogs. */
 export function SessionDialogs({
   active,
   pageCount,
   pageNumbers,
   watermarkPreview,
-  print,
   watermark,
 }: SessionDialogsProps) {
   return (
@@ -61,14 +55,6 @@ export function SessionDialogs({
         progress={pageNumbers.progress}
         validationError={pageNumbers.validationError}
       />
-
-      <PrintDialog
-        onStop={print.discard}
-        open={active && print.preparing}
-        progress={print.progress}
-      />
-
-      {active && print.sheet ? <PrintSheet pages={print.sheet} /> : null}
     </>
   )
 }

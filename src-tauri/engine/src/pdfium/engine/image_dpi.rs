@@ -151,7 +151,12 @@ impl<'a> Walk<'a> {
     /// An image paints the unit square, so the current matrix's axes are its
     /// drawn size in points.
     fn record(&mut self, id: ObjectId, dict: &Dictionary, current: Matrix) {
-        let pixels = |key: &[u8]| dict.get(key).and_then(Object::as_i64).ok();
+        let pixels = |key: &[u8]| {
+            dict.get(key)
+                .ok()
+                .and_then(|object| self.document.dereference(object).ok())
+                .and_then(|(_, object)| object.as_i64().ok())
+        };
         let (Some(width), Some(height)) = (pixels(b"Width"), pixels(b"Height")) else {
             return;
         };

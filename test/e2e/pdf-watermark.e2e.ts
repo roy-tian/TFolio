@@ -262,14 +262,17 @@ describe("TFolio document watermark", () => {
       { timeout: 30_000, timeoutMsg: "the thumbnail did not refresh" },
     )
 
-    // A watermark the app can no longer lift saves only to copies; the tooltip
-    // names that rule, since a clean or pathless document disables the item too.
+    // A watermark the app can no longer lift saves only to copies; the menu's
+    // Save explains that rule, while the toolbar button auto-switches to Save As.
     const save = await appMenuItem("save")
     expect(await save.getAttribute("data-disabled")).not.toBe(null)
     expect(await tooltipOn("[data-action='save']")).toContain(
       "exported as a copy",
     )
     await closeAppMenu(save)
+    const toolbarSave = $("[data-active='true'] [data-slot='pdf-save-trigger']")
+    await expect(toolbarSave).toHaveAttribute("data-save-as-only", "")
+    await expect(toolbarSave).toBeEnabled()
     expect(readFileSync(sourcePath).equals(original)).toBe(true)
 
     mkdirSync("artifacts/e2e", { recursive: true })

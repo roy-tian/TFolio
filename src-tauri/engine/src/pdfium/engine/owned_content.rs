@@ -1,4 +1,15 @@
+use serde::Serialize;
+
 use super::*;
+
+/// Result of a page-number rebuild: `applied` is `false` when stopped partway,
+/// and `padding` carries the virtual padding blanks with any updated labels.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageNumbersOutcome {
+    pub applied: bool,
+    pub padding: Vec<PdfPaddingSheet>,
+}
 
 // Smart colour needs only an average luminance under one small label; a few
 // pixels across it are enough to pick black or white.
@@ -8,9 +19,9 @@ pub(super) const PAGE_NUMBER_SAMPLE_DPI: f32 = 24.0;
 // the drop the number sits on rather than a hairline of it.
 pub(super) const PAGE_NUMBER_SAMPLE_PADDING: f32 = 4.0;
 
-// Runs on every page of a document, so it renders coarser still: here a
-// hairline rule is a grey pixel, which is all the test needs to see.
-pub(super) const PAGE_BLANK_SCAN_DPI: f32 = 18.0;
+// Runs on every page of a document when blank detection is needed; 36 dpi gives
+// ~298x421 pixels on A4, fine enough that short 12 pt text is never missed.
+pub(super) const PAGE_BLANK_SCAN_DPI: f32 = 36.0;
 
 /// One page-content layer's run of objects at a page's tail; identities are
 /// read back from PDFium, not the source text, which an embedded font remaps.
@@ -37,6 +48,29 @@ impl OwnedTailState {
     }
 }
 
+/// The page number stamped on one page, kept by stable page id so watermark
+/// changes, A4 copies, and undo restore the exact label rather than recomputing
+/// numbers against a page list that may have changed since.
+#[derive(Clone, Debug)]
+pub(super) struct PageNumberStamp {
+    pub(super) text: String,
+    pub(super) anchor: PageNumberAnchor,
+    pub(super) color: PdfColor,
+    /// `/Rotate` of the page when the stamp was placed, so an undo puts back
+    /// the orientation the page carried before a later replacement.
+    pub(super) page_rotation: f32,
+}
+
+/// Everything the page-number layer held before a page-numbers command, stashed
+/// by history entry id so an undo restores exact stamps even after edits that
+/// shrank the document past the previous range.
+#[derive(Clone, Debug)]
+pub(super) struct PageNumbersSnapshot {
+    pub(super) config: Option<PageNumbersConfig>,
+    pub(super) stamps: HashMap<u64, PageNumberStamp>,
+    pub(super) padding_numbers: HashMap<u64, PaddingPageNumber>,
+}
+
 /// The page-content layers this session owns, keyed by stable page id so the
 /// record survives structure operations; empty `segments` is owned-but-bare.
 #[derive(Clone, Debug)]
@@ -44,6 +78,14 @@ pub(super) struct OwnedContentState {
     pub(super) watermark: Option<WatermarkConfig>,
     pub(super) page_numbers: Option<PageNumbersConfig>,
     pub(super) per_page: HashMap<u64, OwnedTailState>,
+    pub(super) page_number_stamps: HashMap<u64, PageNumberStamp>,
+    /// Planned labels for virtual padding blanks between files, keyed by the
+    /// stable page id of the page each blank immediately follows.
+    pub(super) padding_numbers: HashMap<u64, PaddingPageNumber>,
+    /// `content_version` at which page numbers were freshly computed for every
+    /// page; a change since makes re-applying the same config rebuild rather
+    /// than no-op.
+    pub(super) page_numbers_version: Option<u64>,
 }
 
 impl OwnedContentState {
@@ -69,20 +111,10 @@ pub(super) struct WatermarkMetrics {
     pub(super) text_height: f32,
 }
 
-/// A planned page-number object; its ink is chosen in the rebuild, sampled
-/// after the old tail is popped so a replacement reads the real backdrop.
-pub(super) struct PageNumberLayerPlan {
-    pub(super) text: String,
-    pub(super) object_rotation: f32,
-    pub(super) center: PageNumberPlacement,
-    pub(super) sample_box: Option<DisplayBox>,
-}
-
 pub(super) struct PageOwnedPlan {
     pub(super) base_objects: usize,
     pub(super) page_number: i32,
     pub(super) watermark: Option<WatermarkLayerPlan>,
-    pub(super) page_number_label: Option<PageNumberLayerPlan>,
 }
 
 /// The watermark layer's rebuild inputs: config, resolved colour and, past
@@ -98,6 +130,47 @@ pub(super) struct WatermarkResources {
 pub(super) struct PageNumbersResources {
     pub(super) config: PageNumbersConfig,
     pub(super) face: Vec<u8>,
+}
+
+/// How the page-number layer behaves during a rebuild of owned tails.
+pub(super) enum PageNumbersPlan {
+    None,
+    /// Fresh numbering walked across all pages and smart-padding blanks.
+    Compute {
+        resources: PageNumbersResources,
+        /// 0-based page indices a Save As inserts a padding blank after.
+        padding: Vec<usize>,
+    },
+    /// Keep existing per-page stamps (used when another layer changes, or when
+    /// re-stamping lifted numbers onto an A4 copy), optionally resampling smart
+    /// colour on the new backdrop.
+    Preserve {
+        resources: PageNumbersResources,
+        stamps: HashMap<u64, PageNumberStamp>,
+        padding_numbers: HashMap<u64, PaddingPageNumber>,
+        resample_color: bool,
+    },
+    /// Undo of a page-numbers command: restores exact stashed stamps & colours.
+    Restore {
+        resources: PageNumbersResources,
+        stamps: HashMap<u64, PageNumberStamp>,
+        padding_numbers: HashMap<u64, PaddingPageNumber>,
+    },
+}
+
+impl PageNumbersPlan {
+    fn resources(&self) -> Option<&PageNumbersResources> {
+        match self {
+            Self::None => None,
+            Self::Compute { resources, .. }
+            | Self::Preserve { resources, .. }
+            | Self::Restore { resources, .. } => Some(resources),
+        }
+    }
+
+    pub(super) fn is_some(&self) -> bool {
+        !matches!(self, Self::None)
+    }
 }
 
 pub(super) fn rotated_watermark_object<'a>(
@@ -214,11 +287,11 @@ pub(super) fn rotated_page_number_object<'a>(
     Ok(object)
 }
 
-pub(super) fn place_text_object(
-    mut object: PdfPageTextObject<'static>,
+pub(super) fn place_text_object<'a>(
+    mut object: PdfPageTextObject<'a>,
     target_x: f32,
     target_y: f32,
-) -> Result<PdfPageTextObject<'static>, String> {
+) -> Result<PdfPageTextObject<'a>, String> {
     let bounds = object
         .bounds()
         .map_err(|error| format!("PDFium could not measure an owned object: {error}"))?;
@@ -233,6 +306,34 @@ pub(super) fn place_text_object(
         .map_err(|error| format!("PDFium could not place an owned object: {error}"))?;
 
     Ok(object)
+}
+
+/// Stamps one page-number label onto a freshly created blank padding sheet.
+pub(super) fn stamp_page_number_on_blank(
+    document: &mut PdfDocument<'_>,
+    page_index: PdfPageIndex,
+    font: PdfFontToken,
+    number: &PaddingPageNumber,
+) -> Result<(), String> {
+    let page_rotation = {
+        let page = document
+            .pages()
+            .get(page_index)
+            .map_err(|error| format!("PDFium could not load the blank page: {error}"))?;
+        page_rotation_degrees(&page)
+    };
+
+    PdfiumEngine::append_page_number(
+        document,
+        page_index,
+        font,
+        number.text.clone(),
+        number.anchor,
+        page_rotation,
+        Some(PdfColor::BLACK),
+    )?;
+
+    Ok(())
 }
 
 /// What a stopped or failed rebuild leaves behind.
@@ -347,7 +448,7 @@ impl PdfiumEngine {
         &self,
         document_id: u64,
         watermark: Option<WatermarkResources>,
-        page_numbers: Option<PageNumbersResources>,
+        page_numbers: PageNumbersPlan,
         on_progress: &mut dyn FnMut(usize, usize),
         operation: &OperationGuard<'_>,
     ) -> Result<bool, String> {
@@ -484,7 +585,7 @@ impl PdfiumEngine {
         &self,
         entry: &mut OpenDocument,
         watermark: Option<WatermarkResources>,
-        page_numbers: Option<PageNumbersResources>,
+        page_numbers: PageNumbersPlan,
         on_progress: &mut dyn FnMut(usize, usize),
         operation: &OperationGuard<'_>,
     ) -> Result<bool, String> {
@@ -567,12 +668,13 @@ impl PdfiumEngine {
         })
     }
 
-    /// Plans every page's rebuild before any is touched, so a failure leaves
-    /// the document untouched; a replacement rebuilds the same base.
+    /// Plans every page's base object count and watermark placements before
+    /// any page is touched, so a planning failure leaves the document untouched.
+    /// Blank-page detection and page-number placement run in the rebuild pass,
+    /// after each page's old owned tail has been popped.
     pub(super) fn plan_owned_content(
         entry: &OpenDocument,
         watermark: Option<(&WatermarkConfig, PdfFontToken, PdfColor)>,
-        page_numbers: Option<(&PageNumbersConfig, PdfFontToken)>,
         on_progress: &mut dyn FnMut(usize, usize),
         operation: &OperationGuard<'_>,
     ) -> Result<Option<Vec<PageOwnedPlan>>, String> {
@@ -588,13 +690,8 @@ impl PdfiumEngine {
         let mut plans = Vec::with_capacity(page_count as usize);
         let mut measured_metrics: Vec<((u32, u32, u32), WatermarkMetrics)> = Vec::new();
         let mut document_objects = 0usize;
-        // The sequence is walked, not indexed: a skipped blank page shifts every
-        // number after it, so the pages have to be visited in order.
-        let mut numbering = page_numbers.map(|(config, _)| PageNumbering::new(config));
 
         for page_number in 1..=page_count {
-            // Read before each page, so a stop costs the reader one page of work
-            // at most — the blank scan here is half of a long document's wait.
             if operation.is_cancelled() {
                 return Ok(None);
             }
@@ -667,84 +764,10 @@ impl PdfiumEngine {
                 None => None,
             };
 
-            // Taken before the plan is built, because the walk has to advance
-            // once per page whether or not that page ends up printing anything.
-            let printed = match (page_numbers, numbering.as_mut()) {
-                (Some((config, _)), Some(numbering)) => {
-                    // No objects and no annotations (which render too) is blank
-                    // without a render; sampling only where a blank rule matters.
-                    let blank = config.needs_blank_scan()
-                        && config.covers(page_number)
-                        && ((base_objects == 0 && page.annotations().is_empty())
-                            || Self::page_is_blank(&page)?);
-
-                    numbering.advance(page_number, blank)
-                }
-                _ => None,
-            };
-
-            let page_number_label = match (page_numbers, printed) {
-                (Some((config, font)), Some(text)) => {
-                    let page_rotation = page_rotation_degrees(&page);
-                    // Page numbers stay upright as seen: the object is turned
-                    // by the negative of the page's `/Rotate`, a render puts back.
-                    let object_rotation = -page_rotation;
-                    let (unrotated_width, unrotated_height) = unrotated_page_size(&page);
-                    let anchor = config.anchor(page_number);
-
-                    // Measured exactly as it will be built, so placement and
-                    // the smart-colour drop both use real bounds.
-                    let measured = rotated_page_number_object(
-                        &entry.document,
-                        font,
-                        &text,
-                        PdfColor::BLACK,
-                        object_rotation,
-                    )?;
-                    let bounds = measured.bounds().map_err(|error| {
-                        format!("PDFium could not measure a page number: {error}")
-                    })?;
-                    let bounds_width = bounds.right().value - bounds.left().value;
-                    let bounds_height = bounds.top().value - bounds.bottom().value;
-                    drop(measured);
-
-                    let center = page_number_center(
-                        unrotated_width,
-                        unrotated_height,
-                        page_rotation,
-                        bounds_width,
-                        bounds_height,
-                        anchor,
-                    );
-
-                    // Sampled in the rebuild, not here: a replacement must read
-                    // the page after its old label is gone.
-                    let sample_box = config.smart_color().then(|| {
-                        page_number_display_box(
-                            unrotated_width,
-                            unrotated_height,
-                            page_rotation,
-                            bounds_width,
-                            bounds_height,
-                            anchor,
-                        )
-                    });
-
-                    Some(PageNumberLayerPlan {
-                        text,
-                        object_rotation,
-                        center,
-                        sample_box,
-                    })
-                }
-                _ => None,
-            };
-
             plans.push(PageOwnedPlan {
                 base_objects,
                 page_number,
                 watermark: watermark_plan,
-                page_number_label,
             });
             on_progress(page_number as usize, page_count as usize * 2);
         }
@@ -777,30 +800,24 @@ impl PdfiumEngine {
             .and_then(|bitmap| bitmap.as_image())
     }
 
-    /// Scans above the band this page's own number would sit in: during a
-    /// replacement the render still carries the session's own marks.
+    /// Scans the whole visible page after this session's old owned tail has
+    /// been popped, so neither a watermark nor a rotated label hides a blank
+    /// page and content near the bottom edge still counts.
     pub(super) fn page_is_blank(page: &PdfPage<'_>) -> Result<bool, String> {
         let display_width = page.width().value;
         let display_height = page.height().value;
 
-        if !display_width.is_finite() || !display_height.is_finite() {
+        if !display_width.is_finite()
+            || !display_height.is_finite()
+            || display_width <= 0.0
+            || display_height <= 0.0
+        {
             return Ok(false);
         }
 
-        let Some(region) = blank_scan_box(display_width, display_height) else {
-            return Ok(false);
-        };
-
         let rendered = Self::render_page_sample(page, PAGE_BLANK_SCAN_DPI)
             .map_err(|error| format!("PDFium could not sample a page for blankness: {error}"))?;
-
-        let height = ((region.height / display_height) * rendered.height() as f32)
-            .ceil()
-            .clamp(1.0, rendered.height() as f32) as u32;
-        let sample = rendered
-            .crop_imm(0, 0, rendered.width(), height)
-            .into_rgba8()
-            .into_raw();
+        let sample = rendered.into_rgba8().into_raw();
 
         Ok(is_blank_sample(&sample))
     }
@@ -910,13 +927,198 @@ impl PdfiumEngine {
         Ok(())
     }
 
+    /// Pops `previous_tail` owned objects into `retired` and appends
+    /// `watermark_objects` in one manual-regeneration pass.
+    fn pop_and_lay_watermark(
+        document: &mut PdfDocument<'static>,
+        page_index: PdfPageIndex,
+        previous_tail: usize,
+        watermark_objects: Vec<PdfPageTextObject<'static>>,
+        retired: &mut Vec<PdfPageObject<'static>>,
+    ) -> Result<(), String> {
+        if previous_tail == 0 && watermark_objects.is_empty() {
+            return Ok(());
+        }
+
+        let mut page = document
+            .pages_mut()
+            .get(page_index)
+            .map_err(|error| format!("PDFium could not load page {}: {error}", page_index + 1))?;
+        page.set_content_regeneration_strategy(PdfPageContentRegenerationStrategy::Manual);
+
+        let mut changed = false;
+        let mut change_error = None;
+
+        {
+            let objects = page.objects_mut();
+
+            for _ in 0..previous_tail {
+                let Some(last) = objects.len().checked_sub(1) else {
+                    change_error = Some("the owned tail disappeared during a rebuild".to_string());
+                    break;
+                };
+
+                match objects.remove_object_at_index(last) {
+                    Ok(object) => {
+                        retired.push(object);
+                        changed = true;
+                    }
+                    Err(error) => {
+                        change_error = Some(format!(
+                            "PDFium could not remove the old owned content: {error}"
+                        ));
+                        break;
+                    }
+                }
+            }
+        }
+
+        if change_error.is_none() {
+            for object in watermark_objects {
+                match page.objects_mut().add_text_object(object) {
+                    Ok(_) => changed = true,
+                    Err(error) => {
+                        change_error =
+                            Some(format!("PDFium could not append the watermark: {error}"));
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Regenerated before the handle closes: PDFium drops inserted-but-unflushed
+        // objects when the page is reopened.
+        if changed && change_error.is_none() {
+            if let Err(error) = page.regenerate_content() {
+                change_error = Some(format!("PDFium could not regenerate the page: {error}"));
+            }
+        }
+
+        page.set_content_regeneration_strategy(
+            PdfPageContentRegenerationStrategy::AutomaticOnEveryChange,
+        );
+
+        match change_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
+    /// Measures, samples smart colour when `color` is `None`, places, and
+    /// appends one page-number object on `page_index`.
+    fn append_page_number<'a>(
+        document: &mut PdfDocument<'a>,
+        page_index: PdfPageIndex,
+        font: PdfFontToken,
+        text: String,
+        anchor: PageNumberAnchor,
+        placement_rotation: f32,
+        color: Option<PdfColor>,
+    ) -> Result<PageNumberStamp, String> {
+        let page_number = page_index + 1;
+        let (origin_x, origin_y, visible_width, visible_height, current_rotation) = {
+            let page = document
+                .pages()
+                .get(page_index)
+                .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
+            let (origin_x, origin_y, visible_width, visible_height) = visible_unrotated_box(&page);
+
+            (
+                origin_x,
+                origin_y,
+                visible_width,
+                visible_height,
+                page_rotation_degrees(&page),
+            )
+        };
+        let object_rotation = -placement_rotation;
+        // Measured exactly as it will be built, so placement and the
+        // smart-colour drop both use real bounds.
+        let measured = rotated_page_number_object(
+            document,
+            font,
+            &text,
+            color.unwrap_or(PdfColor::BLACK),
+            object_rotation,
+        )?;
+        let bounds = measured
+            .bounds()
+            .map_err(|error| format!("PDFium could not measure a page number: {error}"))?;
+        let bounds_width = bounds.right().value - bounds.left().value;
+        let bounds_height = bounds.top().value - bounds.bottom().value;
+
+        let center = page_number_center_in_box(
+            origin_x,
+            origin_y,
+            visible_width,
+            visible_height,
+            placement_rotation,
+            bounds_width,
+            bounds_height,
+            anchor,
+        );
+        let (ink, object) = match color {
+            Some(fixed) => (fixed, measured),
+            None => {
+                drop(measured);
+                let region = page_number_display_box(
+                    visible_width,
+                    visible_height,
+                    current_rotation,
+                    bounds_width,
+                    bounds_height,
+                    anchor,
+                );
+                let sampled = {
+                    let page = document.pages().get(page_index).map_err(|error| {
+                        format!("PDFium could not load page {page_number}: {error}")
+                    })?;
+
+                    Self::sample_ink_color(&page, region)?
+                };
+
+                (
+                    sampled,
+                    rotated_page_number_object(document, font, &text, sampled, object_rotation)?,
+                )
+            }
+        };
+        let object = place_text_object(object, center.center_x, center.center_y)?;
+
+        let mut page = document
+            .pages_mut()
+            .get(page_index)
+            .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
+        page.set_content_regeneration_strategy(PdfPageContentRegenerationStrategy::Manual);
+
+        let append_result = page
+            .objects_mut()
+            .add_text_object(object)
+            .map_err(|error| format!("PDFium could not append the page number: {error}"))
+            .and_then(|_| {
+                page.regenerate_content()
+                    .map_err(|error| format!("PDFium could not regenerate the page: {error}"))
+            });
+        page.set_content_regeneration_strategy(
+            PdfPageContentRegenerationStrategy::AutomaticOnEveryChange,
+        );
+        append_result?;
+
+        Ok(PageNumberStamp {
+            text,
+            anchor,
+            color: ink,
+            page_rotation: placement_rotation,
+        })
+    }
+
     /// Rebuilds every owned tail in the fixed layer order (`add_object` only
     /// appends, so this keeps the stack canonical); `false` is a stopped rebuild.
     pub(super) fn rebuild_owned_content(
         &self,
         entry: &mut OpenDocument,
         watermark: Option<WatermarkResources>,
-        page_numbers: Option<PageNumbersResources>,
+        page_numbers: PageNumbersPlan,
         on_progress: &mut dyn FnMut(usize, usize),
         operation: &OperationGuard<'_>,
         on_failure: RebuildFailure,
@@ -931,7 +1133,11 @@ impl PdfiumEngine {
             return Ok(false);
         }
 
+        let version_before = entry.content_version;
         let previous = entry.owned_content.clone();
+        let previous_pn_version = previous
+            .as_ref()
+            .and_then(|state| state.page_numbers_version);
         let snapshot = match on_failure {
             RebuildFailure::RollBack => Some(
                 entry
@@ -962,7 +1168,7 @@ impl PdfiumEngine {
                 }),
                 None => None,
             };
-            let page_number_font = match &page_numbers {
+            let page_number_font = match page_numbers.resources() {
                 Some(resources) => Some(
                     entry
                         .document
@@ -980,9 +1186,6 @@ impl PdfiumEngine {
                 watermark
                     .as_ref()
                     .map(|resources| (&resources.config, watermark_font.unwrap(), resources.color)),
-                page_numbers
-                    .as_ref()
-                    .map(|resources| (&resources.config, page_number_font.unwrap())),
                 on_progress,
                 operation,
             )?
@@ -1007,6 +1210,49 @@ impl PdfiumEngine {
 
             let planned_pages = plans.len();
             let mut per_page = HashMap::with_capacity(planned_pages);
+            let mut page_number_stamps = HashMap::new();
+            let mut padding_numbers = match &page_numbers {
+                PageNumbersPlan::Preserve {
+                    padding_numbers, ..
+                }
+                | PageNumbersPlan::Restore {
+                    padding_numbers, ..
+                } => {
+                    let live: HashSet<u64> = entry.page_ids.iter().copied().collect();
+                    padding_numbers
+                        .iter()
+                        .filter(|(page_id, _)| live.contains(page_id))
+                        .map(|(page_id, number)| (*page_id, number.clone()))
+                        .collect()
+                }
+                PageNumbersPlan::Compute { .. } | PageNumbersPlan::None => HashMap::new(),
+            };
+            let padding_set: HashSet<usize> = match &page_numbers {
+                PageNumbersPlan::Compute { padding, .. } => padding.iter().copied().collect(),
+                _ => HashSet::new(),
+            };
+            // The sequence is walked in Pass 2 after popping each page's old
+            // tail, counting virtual padding blanks alongside real pages.
+            let mut numbering = match &page_numbers {
+                PageNumbersPlan::Compute { resources, padding } => {
+                    let range_from = resources.config.range_from();
+                    let padding_before = if resources.config.blank_counted {
+                        padding
+                            .iter()
+                            .filter(|&&after| after + 1 < range_from as usize)
+                            .count() as i32
+                    } else {
+                        0
+                    };
+
+                    Some(PageNumbering::new_from(
+                        &resources.config,
+                        range_from + padding_before,
+                    ))
+                }
+                _ => None,
+            };
+            let mut sheet_number = 0i32;
 
             for (index, plan) in plans.into_iter().enumerate() {
                 // Between pages, never inside one: a page keeps a whole tail or
@@ -1016,6 +1262,7 @@ impl PdfiumEngine {
                 }
 
                 let page_id = entry.page_id(plan.page_number)?;
+                let page_index = plan.page_number - 1;
 
                 // Watermark objects built up front, so a failure leaves the page
                 // untouched; the page-number object waits until its drop is real.
@@ -1049,168 +1296,218 @@ impl PdfiumEngine {
                     .and_then(|state| state.per_page.get(&page_id))
                     .map(OwnedTailState::owned_objects)
                     .unwrap_or(0);
+                let need_blank_scan = match &page_numbers {
+                    PageNumbersPlan::Compute { resources, .. } => {
+                        resources.config.needs_blank_scan()
+                            && resources.config.covers(plan.page_number)
+                    }
+                    _ => false,
+                };
 
                 let mut retired = Vec::new();
-                let mut change_error = None;
-                let mut changed = false;
+                let page_result = (|| -> Result<Option<PageNumberStamp>, String> {
+                    let blank = if need_blank_scan {
+                        let empty_base = {
+                            let page = entry.document.pages().get(page_index).map_err(|error| {
+                                format!("PDFium could not load page {}: {error}", plan.page_number)
+                            })?;
+                            plan.base_objects == 0 && page.annotations().is_empty()
+                        };
 
-                // First pass: pop the old tail, lay the watermark, regenerate —
-                // the smart-colour sample reads the backdrop, not the lifted label.
-                {
-                    let mut page = entry
-                        .document
-                        .pages_mut()
-                        .get(plan.page_number - 1)
-                        .map_err(|error| {
-                            format!("PDFium could not load page {}: {error}", plan.page_number)
-                        })?;
-                    page.set_content_regeneration_strategy(
-                        PdfPageContentRegenerationStrategy::Manual,
-                    );
+                        if empty_base {
+                            Self::pop_and_lay_watermark(
+                                &mut entry.document,
+                                page_index,
+                                previous_tail,
+                                watermark_objects,
+                                &mut retired,
+                            )?;
+                            true
+                        } else {
+                            // Pop the old tail and flush before scanning, so
+                            // neither an old watermark nor a rotated old label
+                            // disguises a blank page.
+                            if previous_tail > 0 {
+                                Self::pop_and_lay_watermark(
+                                    &mut entry.document,
+                                    page_index,
+                                    previous_tail,
+                                    Vec::new(),
+                                    &mut retired,
+                                )?;
+                            }
 
-                    {
-                        let objects = page.objects_mut();
-
-                        for _ in 0..previous_tail {
-                            let Some(last) = objects.len().checked_sub(1) else {
-                                change_error =
-                                    Some("the owned tail disappeared during a rebuild".to_string());
-                                break;
+                            let is_blank = {
+                                let page =
+                                    entry.document.pages().get(page_index).map_err(|error| {
+                                        format!(
+                                            "PDFium could not load page {}: {error}",
+                                            plan.page_number
+                                        )
+                                    })?;
+                                Self::page_is_blank(&page)?
                             };
 
-                            match objects.remove_object_at_index(last) {
-                                Ok(object) => {
-                                    retired.push(object);
-                                    changed = true;
-                                }
-                                Err(error) => {
-                                    change_error = Some(format!(
-                                        "PDFium could not remove the old owned content: {error}"
-                                    ));
-                                    break;
+                            if !watermark_objects.is_empty() {
+                                Self::pop_and_lay_watermark(
+                                    &mut entry.document,
+                                    page_index,
+                                    0,
+                                    watermark_objects,
+                                    &mut retired,
+                                )?;
+                            }
+
+                            is_blank
+                        }
+                    } else {
+                        Self::pop_and_lay_watermark(
+                            &mut entry.document,
+                            page_index,
+                            previous_tail,
+                            watermark_objects,
+                            &mut retired,
+                        )?;
+                        false
+                    };
+
+                    match &page_numbers {
+                        PageNumbersPlan::Compute { resources, .. } => {
+                            let numbering = numbering
+                                .as_mut()
+                                .expect("a compute plan implies a numbering walk");
+                            sheet_number += 1;
+                            let page_sheet = sheet_number;
+                            let printed = numbering.advance(plan.page_number, blank);
+
+                            if padding_set.contains(&index) {
+                                sheet_number += 1;
+                                let padding_sheet = sheet_number;
+                                if let Some(text) = numbering.advance_padding(plan.page_number) {
+                                    padding_numbers.insert(
+                                        page_id,
+                                        PaddingPageNumber {
+                                            text,
+                                            anchor: resources.config.anchor(padding_sheet),
+                                        },
+                                    );
                                 }
                             }
-                        }
-                    }
 
-                    if change_error.is_none() {
-                        for object in watermark_objects {
-                            match page.objects_mut().add_text_object(object) {
-                                Ok(_) => changed = true,
-                                Err(error) => {
-                                    change_error = Some(format!(
-                                        "PDFium could not append the watermark: {error}"
-                                    ));
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    // Regenerated before the handle closes: PDFium drops
-                    // inserted-but-unflushed objects when the page is reopened.
-                    if changed && change_error.is_none() {
-                        if let Err(error) = page.regenerate_content() {
-                            change_error =
-                                Some(format!("PDFium could not regenerate the page: {error}"));
-                        }
-                    }
-                    page.set_content_regeneration_strategy(
-                        PdfPageContentRegenerationStrategy::AutomaticOnEveryChange,
-                    );
-                }
-
-                // The ink is read from the drop as it now stands, after the pop,
-                // so a replacement never reads its own old label.
-                let page_number_object = if change_error.is_none() {
-                    match &plan.page_number_label {
-                        Some(layer) => {
-                            let color = match layer.sample_box {
-                                Some(region) => {
-                                    let page =
-                                        entry.document.pages().get(plan.page_number - 1).map_err(
-                                            |error| {
-                                                format!(
-                                                    "PDFium could not load page {}: {error}",
-                                                    plan.page_number
-                                                )
-                                            },
-                                        )?;
-
-                                    Self::sample_ink_color(&page, region)?
-                                }
-                                None => PdfColor::BLACK,
+                            let Some(text) = printed else {
+                                return Ok(None);
+                            };
+                            let page_rotation = {
+                                let page =
+                                    entry.document.pages().get(page_index).map_err(|error| {
+                                        format!(
+                                            "PDFium could not load page {}: {error}",
+                                            plan.page_number
+                                        )
+                                    })?;
+                                page_rotation_degrees(&page)
                             };
                             let font =
                                 page_number_font.expect("a page-number plan implies a loaded font");
-                            let object = rotated_page_number_object(
-                                &entry.document,
+                            let anchor = resources.config.anchor(page_sheet);
+                            let fixed_color =
+                                (!resources.config.smart_color()).then_some(PdfColor::BLACK);
+
+                            Self::append_page_number(
+                                &mut entry.document,
+                                page_index,
                                 font,
-                                &layer.text,
-                                color,
-                                layer.object_rotation,
-                            )?;
-
-                            Some(place_text_object(
-                                object,
-                                layer.center.center_x,
-                                layer.center.center_y,
-                            )?)
+                                text,
+                                anchor,
+                                page_rotation,
+                                fixed_color,
+                            )
+                            .map(Some)
                         }
-                        None => None,
+                        PageNumbersPlan::Preserve {
+                            resources,
+                            stamps,
+                            resample_color,
+                            ..
+                        } => {
+                            let Some(stamp) = stamps.get(&page_id) else {
+                                return Ok(None);
+                            };
+                            let current_rotation = {
+                                let page =
+                                    entry.document.pages().get(page_index).map_err(|error| {
+                                        format!(
+                                            "PDFium could not load page {}: {error}",
+                                            plan.page_number
+                                        )
+                                    })?;
+                                page_rotation_degrees(&page)
+                            };
+                            let font =
+                                page_number_font.expect("a page-number plan implies a loaded font");
+                            let fixed_color = if *resample_color
+                                && resources.config.smart_color()
+                                && stamp.page_rotation == current_rotation
+                            {
+                                None
+                            } else {
+                                Some(stamp.color)
+                            };
+
+                            Self::append_page_number(
+                                &mut entry.document,
+                                page_index,
+                                font,
+                                stamp.text.clone(),
+                                stamp.anchor,
+                                stamp.page_rotation,
+                                fixed_color,
+                            )
+                            .map(Some)
+                        }
+                        PageNumbersPlan::Restore { stamps, .. } => {
+                            let Some(stamp) = stamps.get(&page_id) else {
+                                return Ok(None);
+                            };
+                            let font =
+                                page_number_font.expect("a page-number plan implies a loaded font");
+
+                            Self::append_page_number(
+                                &mut entry.document,
+                                page_index,
+                                font,
+                                stamp.text.clone(),
+                                stamp.anchor,
+                                stamp.page_rotation,
+                                Some(stamp.color),
+                            )
+                            .map(Some)
+                        }
+                        PageNumbersPlan::None => Ok(None),
                     }
-                } else {
-                    None
+                })();
+
+                // Always reattach removed objects before propagating an error,
+                // avoiding pdfium-render's double-destroy on loose drop.
+                let retire_result = match scratch_index {
+                    Some(scratch) => {
+                        Self::retire_owned_objects(&mut entry.document, scratch, retired)
+                    }
+                    None => Ok(()),
                 };
-
-                // Second pass: the number over the flushed watermark; the first
-                // persisted the rest, so a page with no number needs no second.
-                if let Some(object) = page_number_object {
-                    let mut page = entry
-                        .document
-                        .pages_mut()
-                        .get(plan.page_number - 1)
-                        .map_err(|error| {
-                            format!("PDFium could not load page {}: {error}", plan.page_number)
-                        })?;
-                    page.set_content_regeneration_strategy(
-                        PdfPageContentRegenerationStrategy::Manual,
-                    );
-
-                    match page.objects_mut().add_text_object(object) {
-                        Ok(_) => {
-                            if let Err(error) = page.regenerate_content() {
-                                change_error =
-                                    Some(format!("PDFium could not regenerate the page: {error}"));
-                            }
-                        }
-                        Err(error) => {
-                            change_error =
-                                Some(format!("PDFium could not append the page number: {error}"));
-                        }
-                    }
-                    page.set_content_regeneration_strategy(
-                        PdfPageContentRegenerationStrategy::AutomaticOnEveryChange,
-                    );
-                }
-
-                if let Some(index) = scratch_index {
-                    if let Err(error) =
-                        Self::retire_owned_objects(&mut entry.document, index, retired)
-                    {
-                        change_error.get_or_insert(error);
-                    }
-                }
-                if let Some(error) = change_error {
-                    return Err(error);
-                }
+                let stamp = match (page_result, retire_result) {
+                    (Ok(stamp), Ok(())) => stamp,
+                    (Err(error), _) => return Err(error),
+                    (Ok(_), Err(error)) => return Err(error),
+                };
 
                 let mut segment_counts = Vec::new();
                 if let Some(layer) = &plan.watermark {
                     segment_counts.push(layer.placements.len());
                 }
-                if plan.page_number_label.is_some() {
+                if let Some(stamp) = stamp {
                     segment_counts.push(1);
+                    page_number_stamps.insert(page_id, stamp);
                 }
 
                 let tail = Self::read_owned_tail(
@@ -1243,13 +1540,16 @@ impl PdfiumEngine {
             Ok(Some(OwnedContentState {
                 watermark: watermark.as_ref().map(|resources| resources.config.clone()),
                 page_numbers: page_numbers
-                    .as_ref()
+                    .resources()
                     .map(|resources| resources.config.clone()),
                 per_page,
+                page_number_stamps,
+                padding_numbers,
+                page_numbers_version: None,
             }))
         })();
 
-        let state = match (rebuilt, snapshot) {
+        let mut state = match (rebuilt, snapshot) {
             (Ok(Some(state)), _) => state,
             // A stop is a failure only when the rollback itself fails — the one
             // case leaving a document neither reader nor session asked for.
@@ -1271,12 +1571,20 @@ impl PdfiumEngine {
         // A rebuild that had something to pop leaves orphaned fonts and content
         // behind for the next save to collect; a first apply removes nothing.
         entry.needs_compaction |= previous.is_some();
+        entry.invalidate_all_page_revisions();
+        state.page_numbers_version = match &page_numbers {
+            PageNumbersPlan::Compute { .. } => Some(entry.content_version),
+            PageNumbersPlan::Preserve { .. } if previous_pn_version == Some(version_before) => {
+                Some(entry.content_version)
+            }
+            PageNumbersPlan::Preserve { .. } => previous_pn_version,
+            PageNumbersPlan::Restore { .. } | PageNumbersPlan::None => None,
+        };
         entry.owned_content = if state.has_active_layer() {
             Some(state)
         } else {
             None
         };
-        entry.invalidate_all_page_revisions();
         on_progress(total, total);
 
         Ok(true)
@@ -1316,19 +1624,68 @@ impl PdfiumEngine {
         })
     }
 
-    /// The page-number layer's resources from the current config, or `None` —
-    /// what a watermark change passes so the other layer survives unchanged.
+    /// The page-number layer's current stamps as a preserve plan — what a
+    /// watermark change passes so existing per-page numbers survive untouched
+    /// while still resampling smart colour over the updated watermark.
     pub(super) fn existing_page_numbers(
         &self,
         entry: &OpenDocument,
-    ) -> Result<Option<PageNumbersResources>, String> {
-        match entry
-            .owned_content
-            .as_ref()
-            .and_then(|state| state.page_numbers.clone())
-        {
-            Some(config) => Ok(Some(self.page_numbers_resources(&config)?)),
-            None => Ok(None),
+    ) -> Result<PageNumbersPlan, String> {
+        let Some(state) = entry.owned_content.as_ref() else {
+            return Ok(PageNumbersPlan::None);
+        };
+        let Some(config) = state.page_numbers.as_ref() else {
+            return Ok(PageNumbersPlan::None);
+        };
+
+        Ok(PageNumbersPlan::Preserve {
+            resources: self.page_numbers_resources(config)?,
+            stamps: state.page_number_stamps.clone(),
+            padding_numbers: state.padding_numbers.clone(),
+            resample_color: true,
+        })
+    }
+
+    /// Maps the document's existing page-number stamps onto a fresh A4 copy's
+    /// 0..N page ids, upright (`page_rotation = 0.0`) because fitting to A4
+    /// already baked each source page's `/Rotate` into its form XObject.
+    pub(super) fn a4_page_numbers(&self, entry: &OpenDocument) -> Result<PageNumbersPlan, String> {
+        let Some(state) = entry.owned_content.as_ref() else {
+            return Ok(PageNumbersPlan::None);
+        };
+        let Some(config) = state.page_numbers.as_ref() else {
+            return Ok(PageNumbersPlan::None);
+        };
+
+        let mut stamps = HashMap::new();
+        for (index, page_id) in entry.page_ids.iter().enumerate() {
+            if let Some(stamp) = state.page_number_stamps.get(page_id) {
+                let mut upright = stamp.clone();
+                upright.page_rotation = 0.0;
+                stamps.insert(index as u64, upright);
+            }
+        }
+
+        Ok(PageNumbersPlan::Preserve {
+            resources: self.page_numbers_resources(config)?,
+            stamps,
+            padding_numbers: HashMap::new(),
+            resample_color: true,
+        })
+    }
+
+    fn snapshot_page_numbers(entry: &OpenDocument) -> PageNumbersSnapshot {
+        match entry.owned_content.as_ref() {
+            Some(state) => PageNumbersSnapshot {
+                config: state.page_numbers.clone(),
+                stamps: state.page_number_stamps.clone(),
+                padding_numbers: state.padding_numbers.clone(),
+            },
+            None => PageNumbersSnapshot {
+                config: None,
+                stamps: HashMap::new(),
+                padding_numbers: HashMap::new(),
+            },
         }
     }
 
@@ -1453,46 +1810,68 @@ impl PdfiumEngine {
 
     /// Applies page numbers, rebuilding every owned layer's tail in canonical
     /// order, numbers on top; the range validates against the current length.
+    /// When `stash_id` is given, snapshots the previous page-number state so
+    /// undo can restore exact stamps via `restore_page_numbers_with_progress`.
     pub fn apply_page_numbers_with_progress(
         &self,
         document_id: u64,
         config: PageNumbersConfig,
+        stash_id: Option<u64>,
         mut on_progress: impl FnMut(usize, usize),
-    ) -> Result<bool, String> {
+    ) -> Result<PageNumbersOutcome, String> {
         // Listed before the lock wait, so a rebuild queued behind another can be
         // stopped before it has run.
         let operation = self.begin_operation(OperationTarget::Document(document_id));
         let mut documents = self.lock_documents()?;
 
         if operation.is_cancelled() {
-            return Ok(false);
+            return Ok(PageNumbersOutcome {
+                applied: false,
+                padding: Vec::new(),
+            });
         }
 
         let entry = open_entry_mut(&mut documents, document_id)?;
         entry.ensure_editable()?;
         let config = config.validated(entry.page_ids.len() as i32)?;
 
-        // Checked before any work, so an unchanged config never rebuilds the
-        // other layer's font; one lock, no IPC slips between check and rebuild.
-        if entry
-            .owned_content
-            .as_ref()
-            .is_some_and(|state| state.page_numbers.as_ref() == Some(&config))
-        {
-            return Ok(true);
+        let previous_snapshot = stash_id.map(|_| Self::snapshot_page_numbers(entry));
+
+        // Skip only when the exact config already stands on the current content
+        // version: an insert, delete, rotation, or smart-padding toggle since
+        // must renumber even under the same settings.
+        if entry.owned_content.as_ref().is_some_and(|state| {
+            state.page_numbers.as_ref() == Some(&config)
+                && state.page_numbers_version == Some(entry.content_version)
+        }) {
+            if let (Some(id), Some(snapshot)) = (stash_id, previous_snapshot) {
+                entry.page_number_stashes.insert(id, snapshot);
+            }
+            return Ok(PageNumbersOutcome {
+                applied: true,
+                padding: entry.padding_sheets(),
+            });
         }
         // The other layer rebuilds from its current config, its subset taken
         // under the lock — the accepted cost of stacking a second layer.
         let watermark = self.existing_watermark(entry)?;
-        let page_numbers = self.page_numbers_resources(&config)?;
+        let page_numbers = PageNumbersPlan::Compute {
+            resources: self.page_numbers_resources(&config)?,
+            padding: entry.padding_indices(),
+        };
 
-        self.verify_and_rebuild(
-            entry,
-            watermark,
-            Some(page_numbers),
-            &mut on_progress,
-            &operation,
-        )
+        let applied =
+            self.verify_and_rebuild(entry, watermark, page_numbers, &mut on_progress, &operation)?;
+        let padding = if applied {
+            if let (Some(id), Some(snapshot)) = (stash_id, previous_snapshot) {
+                entry.page_number_stashes.insert(id, snapshot);
+            }
+            entry.padding_sheets()
+        } else {
+            Vec::new()
+        };
+
+        Ok(PageNumbersOutcome { applied, padding })
     }
 
     #[cfg(test)]
@@ -1501,7 +1880,8 @@ impl PdfiumEngine {
         document_id: u64,
         config: PageNumbersConfig,
     ) -> Result<bool, String> {
-        self.apply_page_numbers_with_progress(document_id, config, |_, _| {})
+        self.apply_page_numbers_with_progress(document_id, config, None, |_, _| {})
+            .map(|outcome| outcome.applied)
     }
 
     /// Removes only the page numbers this open session owns, rebuilding any
@@ -1509,13 +1889,17 @@ impl PdfiumEngine {
     pub fn remove_page_numbers_with_progress(
         &self,
         document_id: u64,
+        stash_id: Option<u64>,
         mut on_progress: impl FnMut(usize, usize),
-    ) -> Result<bool, String> {
+    ) -> Result<PageNumbersOutcome, String> {
         let operation = self.begin_operation(OperationTarget::Document(document_id));
         let mut documents = self.lock_documents()?;
 
         if operation.is_cancelled() {
-            return Ok(false);
+            return Ok(PageNumbersOutcome {
+                applied: false,
+                padding: Vec::new(),
+            });
         }
 
         let entry = open_entry_mut(&mut documents, document_id)?;
@@ -1528,13 +1912,95 @@ impl PdfiumEngine {
         {
             return Err("this session has no page numbers to remove".into());
         }
+        let previous_snapshot = stash_id.map(|_| Self::snapshot_page_numbers(entry));
         let watermark = self.existing_watermark(entry)?;
 
-        self.verify_and_rebuild(entry, watermark, None, &mut on_progress, &operation)
+        let applied = self.verify_and_rebuild(
+            entry,
+            watermark,
+            PageNumbersPlan::None,
+            &mut on_progress,
+            &operation,
+        )?;
+        let padding = if applied {
+            if let (Some(id), Some(snapshot)) = (stash_id, previous_snapshot) {
+                entry.page_number_stashes.insert(id, snapshot);
+            }
+            entry.padding_sheets()
+        } else {
+            Vec::new()
+        };
+
+        Ok(PageNumbersOutcome { applied, padding })
     }
 
     #[cfg(test)]
     pub(super) fn remove_page_numbers(&self, document_id: u64) -> Result<bool, String> {
-        self.remove_page_numbers_with_progress(document_id, |_, _| {})
+        self.remove_page_numbers_with_progress(document_id, None, |_, _| {})
+            .map(|outcome| outcome.applied)
+    }
+
+    /// Restores the exact page-number stamps and padding labels stashed before
+    /// history entry `stash_id`: unlike re-running `apply_page_numbers`, this
+    /// never fails when the document shrank past an earlier range and never
+    /// shifts stamps across prior structure edits.
+    pub fn restore_page_numbers_with_progress(
+        &self,
+        document_id: u64,
+        stash_id: u64,
+        mut on_progress: impl FnMut(usize, usize),
+    ) -> Result<PageNumbersOutcome, String> {
+        let operation = self.begin_operation(OperationTarget::Document(document_id));
+        let mut documents = self.lock_documents()?;
+
+        if operation.is_cancelled() {
+            return Ok(PageNumbersOutcome {
+                applied: false,
+                padding: Vec::new(),
+            });
+        }
+
+        let entry = open_entry_mut(&mut documents, document_id)?;
+        entry.ensure_editable()?;
+        let (config, stamps, padding_numbers) = {
+            let Some(snapshot) = entry.page_number_stashes.get(&stash_id) else {
+                return Err("there is no stashed page-number state under this undo entry".into());
+            };
+            (
+                snapshot.config.clone(),
+                snapshot.stamps.clone(),
+                snapshot.padding_numbers.clone(),
+            )
+        };
+        let watermark = self.existing_watermark(entry)?;
+        let page_numbers = match &config {
+            Some(config) => PageNumbersPlan::Restore {
+                resources: self.page_numbers_resources(config)?,
+                stamps,
+                padding_numbers,
+            },
+            None => PageNumbersPlan::None,
+        };
+
+        let applied =
+            self.verify_and_rebuild(entry, watermark, page_numbers, &mut on_progress, &operation)?;
+        let padding = if applied {
+            entry.page_number_stashes.remove(&stash_id);
+            entry.padding_sheets()
+        } else {
+            Vec::new()
+        };
+
+        Ok(PageNumbersOutcome { applied, padding })
+    }
+
+    /// The virtual padding blanks a Save As will insert, with any page numbers
+    /// currently planned for them.
+    #[cfg(test)]
+    pub(super) fn padding_sheets(&self, document_id: u64) -> Result<Vec<PdfPaddingSheet>, String> {
+        let documents = self.lock_documents()?;
+        let entry = open_entry(&documents, document_id)?;
+
+        Ok(entry.padding_sheets())
     }
 }

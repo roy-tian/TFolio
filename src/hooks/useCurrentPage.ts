@@ -15,11 +15,15 @@ export type CurrentPage = {
   goTo: (pageNumber: number) => void
   /** The jump `goTo` last made, which the tracker carries on and lets go. */
   jump: JumpTarget | null
+  /** Incremented by every `goTo` call, even onto the same page, so sidebars
+      that follow explicit jumps know one happened when `get()` stays put. */
+  jumpCount: () => number
   /** A move of the view the app made itself, as a turn that shortens the
       document clamping the scroll, or a zoom or resize re-anchoring it: the
       jump lands again where it leaves its page, rather than read as the
-      reader reading on. */
-  reland: () => void
+      reader reading on. Passing `pageNumber` also restores a jump whose
+      arrival window expired while waiting for delayed highlights. */
+  reland: (pageNumber?: number) => void
   /** An edit moved the pages, and the page being read, or the one in its
       place, is now `pageNumber`. Where the view holds that page in place
       (`held`), a jump on it moves with it and lands again; else the scroll
@@ -32,6 +36,7 @@ export type CurrentPage = {
 
 export function createCurrentPage(initial: number): CurrentPage {
   let pageNumber = initial
+  let jumps = 0
   const listeners = new Set<() => void>()
   const notify = () => {
     for (const listener of listeners) {
@@ -50,6 +55,7 @@ export function createCurrentPage(initial: number): CurrentPage {
   const store: CurrentPage = {
     get: () => pageNumber,
     goTo: (next) => {
+      jumps += 1
       store.jump = { landedTop: null, page: next, since: performance.now() }
       pageNumber = next
       // Told even when the page stays: the tracker lands a jump that scrolls
@@ -57,9 +63,14 @@ export function createCurrentPage(initial: number): CurrentPage {
       notify()
     },
     jump: null,
-    reland: () => {
+    jumpCount: () => jumps,
+    reland: (target?: number) => {
       if (store.jump) {
         store.jump = { ...store.jump, landedTop: null, since: performance.now() }
+        notify()
+      } else if (target !== undefined) {
+        store.jump = { landedTop: null, page: target, since: performance.now() }
+        pageNumber = target
         notify()
       }
     },
@@ -85,4 +96,13 @@ export function createCurrentPage(initial: number): CurrentPage {
 
 export function useCurrentPage(currentPage: CurrentPage) {
   return useSyncExternalStore(currentPage.subscribe, currentPage.get)
+}
+
+/** Subscribes to a primitive derived from the current page so scrolling across
+    pages that map to the same value triggers no re-render. */
+export function useCurrentPageSelector<T>(
+  currentPage: CurrentPage,
+  select: (pageNumber: number) => T,
+) {
+  return useSyncExternalStore(currentPage.subscribe, () => select(currentPage.get()))
 }

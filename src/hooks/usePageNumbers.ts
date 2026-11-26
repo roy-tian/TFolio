@@ -55,6 +55,11 @@ export function usePageNumbers({
   const [open, setOpen] = useState(false)
   // A stop the backend had nothing to answer with, still owed to the reader.
   const unanswered = useRef(false)
+  // Synchronous guard against rapid double-clicks before React disables buttons.
+  const applyingRef = useRef(false)
+  // Invalidated on document switch so a settling run from the previous document
+  // never clears this document's lock or closes its dialog.
+  const runIdRef = useRef(0)
 
   const ask = useCallback(async () => {
     if (await onCancel()) {
@@ -81,7 +86,7 @@ export function usePageNumbers({
     (nextOpen: boolean) => {
       // Keep the determinate feedback in view until the document transaction
       // settles. The successful path closes itself below.
-      if (!nextOpen && isApplying) {
+      if (!nextOpen && (isApplying || applyingRef.current)) {
         return
       }
 
@@ -104,10 +109,12 @@ export function usePageNumbers({
   )
 
   const apply = useCallback(async () => {
-    if (!parsed.config || pageCount < 1) {
+    if (applyingRef.current || !parsed.config || pageCount < 1) {
       return
     }
 
+    const runId = ++runIdRef.current
+    applyingRef.current = true
     unanswered.current = false
     setProgress({ completed: 0, total: pageCount * 2 })
     setIsApplying(true)
@@ -115,8 +122,15 @@ export function usePageNumbers({
     try {
       // Only an accepted change is worth remembering as a style. A stop also
       // leaves the dialog, but takes nothing: the document is back as it was.
-      const outcome = await onSet(parsed.config, pageCount, trackProgress)
+      const outcome = await onSet(parsed.config, pageCount, (next) => {
+        if (runIdRef.current === runId) {
+          trackProgress(next)
+        }
+      })
 
+      if (runIdRef.current !== runId) {
+        return
+      }
       if (outcome === "applied") {
         storePageNumbersPreferences(parsed.config)
       }
@@ -124,29 +138,46 @@ export function usePageNumbers({
         setOpen(false)
       }
     } finally {
-      setProgress(null)
-      setIsApplying(false)
-      setIsStopping(false)
+      if (runIdRef.current === runId) {
+        applyingRef.current = false
+        setProgress(null)
+        setIsApplying(false)
+        setIsStopping(false)
+      }
     }
   }, [onSet, pageCount, parsed, trackProgress])
 
   const remove = useCallback(async () => {
-    if (!activeConfig || pageCount < 1) {
+    if (applyingRef.current || !activeConfig || pageCount < 1) {
       return
     }
 
+    const runId = ++runIdRef.current
+    applyingRef.current = true
     unanswered.current = false
     setProgress({ completed: 0, total: pageCount * 2 })
     setIsApplying(true)
     setIsStopping(false)
     try {
-      if ((await onSet(null, pageCount, trackProgress)) !== "failed") {
+      const outcome = await onSet(null, pageCount, (next) => {
+        if (runIdRef.current === runId) {
+          trackProgress(next)
+        }
+      })
+
+      if (runIdRef.current !== runId) {
+        return
+      }
+      if (outcome !== "failed") {
         setOpen(false)
       }
     } finally {
-      setProgress(null)
-      setIsApplying(false)
-      setIsStopping(false)
+      if (runIdRef.current === runId) {
+        applyingRef.current = false
+        setProgress(null)
+        setIsApplying(false)
+        setIsStopping(false)
+      }
     }
   }, [activeConfig, onSet, pageCount, trackProgress])
 
@@ -167,6 +198,8 @@ export function usePageNumbers({
   // A draft belongs to one open document, so a switch closes the dialog; the
   // next open re-derives the draft, leaving nothing to reset here.
   useEffect(() => {
+    runIdRef.current += 1
+    applyingRef.current = false
     unanswered.current = false
     setOpen(false)
     setIsApplying(false)

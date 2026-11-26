@@ -16,7 +16,8 @@ pub use archive::{ArchiveOptions, ImageFormat};
 pub use compress::{CompressionEstimate, CompressionOptions};
 pub use engine::{
     is_merge_image, A4Copy, EnginePaths, FileKey, FileOptions, FileSourceInfo, OperationTarget,
-    PdfPaddingSheet, PdfSection, PdfiumEngine, MERGE_IMAGE_EXTENSIONS, SOURCE_CHANGED,
+    PageNumbersOutcome, PdfPaddingSheet, PdfSection, PdfiumEngine, MERGE_IMAGE_EXTENSIONS,
+    SOURCE_CHANGED,
 };
 pub use font::{download_fallback_font, CJK_FONT_NAME};
 pub use library::PDFIUM_LIBRARY_NAME;
@@ -84,14 +85,6 @@ impl PdfDocumentInfo {
             padding: update.padding,
             file_options: update.file_options,
             signatures: update.signatures,
-        }
-    }
-
-    /// The same document once a write has bound it to `path`.
-    pub fn bound_to(self, path: String) -> Self {
-        Self {
-            path: Some(path),
-            ..self
         }
     }
 }

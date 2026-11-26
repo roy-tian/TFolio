@@ -1,4 +1,5 @@
-import type { PdfOutlineItem } from "@/lib/pdf"
+import type { FileRun } from "@/lib/pageSections"
+import type { PdfOutlineItem, PdfSection } from "@/lib/pdf"
 
 /** What the sidebar's outline holds folded, by key: a document's bookmarks
     by their place under their parent's, and a file of several by its id. */
@@ -12,6 +13,10 @@ export function bookmarkFoldKey(parentKey: string, index: number) {
 
 export function fileFoldKey(sectionId: number) {
   return `file-${sectionId}`
+}
+
+export function fileRunKey(run: Pick<FileRun, "ordinal" | "section">) {
+  return `${run.section}:${run.ordinal}`
 }
 
 export const DOCUMENT_OUTLINE_KEY = "root"
@@ -74,4 +79,100 @@ export function foldAllOf(folds: OutlineFolds, top: readonly string[], all: read
       return next
     },
   }
+}
+
+/**
+ * The visible bookmark key for `pageNumber`: the deepest/latest bookmark in
+ * pre-order whose page is `<= pageNumber` with the highest page number (so an
+ * out-of-order back-link later in the tree cannot hijack an earlier section).
+ * Where an ancestor of that match is folded away, that collapsed ancestor
+ * stands in for it instead of unfolding the reader's outline.
+ */
+export function activeBookmarkKey(
+  items: readonly PdfOutlineItem[],
+  parentKey: string,
+  pageNumber: number,
+  folds: OutlineFolds,
+): string | null {
+  let bestPage = -1
+  let bestKey: string | null = null
+  let crossedHigher = false
+
+  const walk = (
+    list: readonly PdfOutlineItem[],
+    prefix: string,
+    foldedAncestor: string | null,
+  ) => {
+    for (let index = 0; index < list.length; index += 1) {
+      const item = list[index]!
+      // Once inside a folded ancestor, every descendant stands behind that
+      // ancestor's key, avoiding key formatting and fold lookups below it.
+      const key = foldedAncestor ?? bookmarkFoldKey(prefix, index)
+
+      if (item.pageNumber !== null) {
+        if (item.pageNumber > pageNumber) {
+          crossedHigher = true
+        } else if (
+          item.pageNumber > bestPage ||
+          (item.pageNumber === bestPage && !crossedHigher)
+        ) {
+          bestPage = item.pageNumber
+          bestKey = key
+          crossedHigher = false
+        }
+      }
+
+      if (item.items.length > 0) {
+        const nextFolded = foldedAncestor ?? (folds.has(key) ? key : null)
+        walk(item.items, key, nextFolded)
+      }
+    }
+  }
+
+  walk(items, parentKey, null)
+
+  return bestKey
+}
+
+export type FileOutlineTarget =
+  | { kind: "bookmark"; key: string }
+  | { kind: "file"; key: string }
+
+/** Which visible row of the multi-file outline holds `pageNumber`: an open
+    bookmark under its file when one covers it, otherwise the file's own row. */
+export function activeFileOutlineTarget(
+  runs: readonly FileRun[],
+  sections: ReadonlyMap<number, PdfSection>,
+  pageNumber: number,
+  folds: OutlineFolds,
+): FileOutlineTarget | null {
+  const run = runs.find(
+    (candidate) => pageNumber >= candidate.first && pageNumber < candidate.first + candidate.count,
+  )
+
+  if (!run) {
+    return null
+  }
+
+  const section = sections.get(run.section)
+
+  if (
+    run.leads &&
+    section &&
+    section.outline.length > 0 &&
+    !folds.has(fileFoldKey(section.id))
+  ) {
+    const bookmark = activeBookmarkKey(
+      section.outline,
+      sectionOutlineKey(section.id),
+      pageNumber,
+      folds,
+    )
+
+    if (bookmark !== null) {
+      return { kind: "bookmark", key: bookmark }
+    }
+  }
+
+  return { kind: "file", key: fileRunKey(run) }
 }

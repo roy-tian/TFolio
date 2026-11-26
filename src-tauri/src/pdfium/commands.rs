@@ -7,22 +7,20 @@ use tauri::{
     ipc::{Channel, InvokeBody, Request, Response},
     AppHandle, Manager, State, WebviewWindow,
 };
-use tauri_plugin_dialog::DialogExt;
 use tfolio_engine::{
     download_fallback_font, size_limit_error, ExportOutcome, OperationTarget, PageNumbersConfig,
-    PagePoint, PagePointsRect, PdfDocumentInfo, PdfSearchOutcome, PdfSignatures,
-    PdfStructureUpdate, PdfTextSpan, PdfiumEngine, RectEffect, RectStyle, SignatureDecision,
-    TextNoteStyle, WatermarkConfig, MAX_PDF_BYTES, MERGE_IMAGE_EXTENSIONS, WORD_EXTENSIONS,
+    PageNumbersOutcome, PagePoint, PagePointsRect, PdfDocumentInfo, PdfSearchOutcome,
+    PdfSignatures, PdfStructureUpdate, PdfTextSpan, PdfiumEngine, RectEffect, RectStyle,
+    SignatureDecision, TextNoteStyle, WatermarkConfig, MAX_PDF_BYTES, MERGE_IMAGE_EXTENSIONS,
+    WORD_EXTENSIONS,
 };
 
 use crate::recent::RecentFiles;
-use crate::windows::{
-    page_generation, record_document, DocumentFile, DocumentOwners, PageGeneration,
-};
+use crate::windows::{page_generation, record_document, DocumentFile, DocumentOwners};
 
 use super::encode::{encode_png, encode_webp};
 use super::paths::fallback_font_destination;
-use super::{PdfProgress, PdfiumState};
+use super::{DialogOutcome, PdfProgress, PdfiumState};
 
 /// A path is a string any page code can make up, so only paths the OS produced
 /// in this process's sight are acted on; the e2e build waives the check.
@@ -342,18 +340,24 @@ pub async fn remove_pdf_watermark(
     .map_err(|error| format!("PDFium watermark removal task failed: {error}"))?
 }
 
-/// `false` is a run the reader stopped, as `apply_pdf_watermark` reports.
+/// `applied: false` is a run the reader stopped, as `apply_pdf_watermark` reports.
 #[tauri::command]
 pub async fn apply_pdf_page_numbers(
     document_id: u64,
     config: PageNumbersConfig,
+    stash_id: Option<u64>,
     on_progress: Channel<PdfProgress>,
     state: State<'_, PdfiumState>,
-) -> Result<bool, String> {
+) -> Result<PageNumbersOutcome, String> {
     let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || {
-        engine.apply_page_numbers_with_progress(document_id, config, channel_progress(on_progress))
+        engine.apply_page_numbers_with_progress(
+            document_id,
+            config,
+            stash_id,
+            channel_progress(on_progress),
+        )
     })
     .await
     .map_err(|error| format!("PDFium page-number task failed: {error}"))?
@@ -362,16 +366,41 @@ pub async fn apply_pdf_page_numbers(
 #[tauri::command]
 pub async fn remove_pdf_page_numbers(
     document_id: u64,
+    stash_id: Option<u64>,
     on_progress: Channel<PdfProgress>,
     state: State<'_, PdfiumState>,
-) -> Result<bool, String> {
+) -> Result<PageNumbersOutcome, String> {
     let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || {
-        engine.remove_page_numbers_with_progress(document_id, channel_progress(on_progress))
+        engine.remove_page_numbers_with_progress(
+            document_id,
+            stash_id,
+            channel_progress(on_progress),
+        )
     })
     .await
     .map_err(|error| format!("PDFium page-number removal task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn restore_pdf_page_numbers(
+    document_id: u64,
+    stash_id: u64,
+    on_progress: Channel<PdfProgress>,
+    state: State<'_, PdfiumState>,
+) -> Result<PageNumbersOutcome, String> {
+    let engine = Arc::clone(&state.engine);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        engine.restore_page_numbers_with_progress(
+            document_id,
+            stash_id,
+            channel_progress(on_progress),
+        )
+    })
+    .await
+    .map_err(|error| format!("PDFium page-number restore task failed: {error}"))?
 }
 
 /// Deliberately not `spawn_blocking`: the operation this one must reach holds
@@ -657,44 +686,45 @@ pub fn word_conversion_available(state: State<'_, PdfiumState>) -> bool {
 /// Shows the native open dialog and hands back the chosen path — recorded as
 /// approved, which is what entitles `open_pdf_from_path` to act on it later.
 /// Images and Word documents ride along, the merge's source list in miniature;
+/// Extensions a file picker offers alongside PDFs: images always, Word files
+/// only when the machine has a suite that can convert them.
+fn source_file_extensions(word: bool) -> Vec<&'static str> {
+    let mut extensions = vec!["pdf"];
+
+    extensions.extend_from_slice(&MERGE_IMAGE_EXTENSIONS);
+
+    if word {
+        extensions.extend_from_slice(&WORD_EXTENSIONS);
+    }
+
+    extensions
+}
+
 /// they open converted, which needs no approval of their own.
 #[tauri::command]
 pub async fn pick_pdf_path(
     filter_label: String,
-    app: AppHandle,
     state: State<'_, PdfiumState>,
+    window: WebviewWindow,
 ) -> Result<Option<String>, String> {
-    let state = state.inner().clone();
-    let word = state.word_available();
+    let extensions = source_file_extensions(state.word_available());
+    let picked = match state
+        .run_file_dialog(&window, move |dialog| {
+            dialog
+                .add_filter(filter_label, &extensions)
+                .blocking_pick_file()
+        })
+        .await?
+    {
+        DialogOutcome::Picked(picked) => picked,
+        DialogOutcome::Cancelled | DialogOutcome::Busy => return Ok(None),
+    };
+    let path = picked
+        .into_path()
+        .map_err(|error| format!("the chosen file is unusable: {error}"))?;
 
-    tauri::async_runtime::spawn_blocking(move || -> Result<Option<String>, String> {
-        let mut extensions = vec!["pdf"];
-
-        extensions.extend_from_slice(&MERGE_IMAGE_EXTENSIONS);
-
-        // Word documents follow what the machine itself offers: a dialog
-        // offering a file the backend would then refuse is a worse promise.
-        if word {
-            extensions.extend_from_slice(&WORD_EXTENSIONS);
-        }
-
-        let Some(picked) = app
-            .dialog()
-            .file()
-            .add_filter(filter_label, &extensions)
-            .blocking_pick_file()
-        else {
-            return Ok(None);
-        };
-        let path = picked
-            .into_path()
-            .map_err(|error| format!("the chosen file is unusable: {error}"))?;
-
-        state.approve_paths([&path]);
-        Ok(Some(path.to_string_lossy().into_owned()))
-    })
-    .await
-    .map_err(|error| format!("dialog task failed: {error}"))?
+    state.approve_paths([&path]);
+    Ok(Some(path.to_string_lossy().into_owned()))
 }
 
 #[tauri::command]
@@ -799,51 +829,38 @@ pub async fn pdf_file_changed(
 #[tauri::command]
 pub async fn pick_pdf_paths(
     filter_label: String,
-    app: AppHandle,
     state: State<'_, PdfiumState>,
+    window: WebviewWindow,
 ) -> Result<Vec<String>, String> {
-    let state = state.inner().clone();
-    let word = state.word_available();
+    // One filter covering everything a merge can take: a reader adding a
+    // scan should not have to know it is offered under a second heading.
+    let extensions = source_file_extensions(state.word_available());
+    let picked = match state
+        .run_file_dialog(&window, move |dialog| {
+            dialog
+                .add_filter(filter_label, &extensions)
+                .blocking_pick_files()
+        })
+        .await?
+    {
+        DialogOutcome::Picked(picked) => picked,
+        DialogOutcome::Cancelled | DialogOutcome::Busy => return Ok(Vec::new()),
+    };
 
-    tauri::async_runtime::spawn_blocking(move || -> Result<Vec<String>, String> {
-        // One filter covering everything a merge can take: a reader adding a
-        // scan should not have to know it is offered under a second heading.
-        let mut extensions = vec!["pdf"];
+    let paths = picked
+        .into_iter()
+        .map(|file| {
+            file.into_path()
+                .map_err(|error| format!("a chosen file is unusable: {error}"))
+        })
+        .collect::<Result<Vec<PathBuf>, _>>()?;
 
-        extensions.extend_from_slice(&MERGE_IMAGE_EXTENSIONS);
+    state.approve_paths(paths.iter());
 
-        // Word documents follow what the machine itself offers: a dialog
-        // offering a file the backend would then refuse is a worse promise.
-        if word {
-            extensions.extend_from_slice(&WORD_EXTENSIONS);
-        }
-
-        let Some(picked) = app
-            .dialog()
-            .file()
-            .add_filter(filter_label, &extensions)
-            .blocking_pick_files()
-        else {
-            return Ok(Vec::new());
-        };
-
-        let paths = picked
-            .into_iter()
-            .map(|file| {
-                file.into_path()
-                    .map_err(|error| format!("a chosen file is unusable: {error}"))
-            })
-            .collect::<Result<Vec<PathBuf>, _>>()?;
-
-        state.approve_paths(paths.iter());
-
-        Ok(paths
-            .iter()
-            .map(|path| path.to_string_lossy().into_owned())
-            .collect())
-    })
-    .await
-    .map_err(|error| format!("dialog task failed: {error}"))?
+    Ok(paths
+        .iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect())
 }
 
 #[tauri::command]
@@ -857,7 +874,7 @@ pub async fn save_pdf(document_id: u64, state: State<'_, PdfiumState>) -> Result
 
 /// A suggestion carrying directories would start the reader in a place of the
 /// page's choosing.
-pub(super) fn suggested_file_name(suggested: &str) -> String {
+fn suggested_file_name(suggested: &str) -> String {
     Path::new(suggested)
         .file_name()
         .and_then(|name| name.to_str())
@@ -868,26 +885,40 @@ pub(super) fn suggested_file_name(suggested: &str) -> String {
 /// Every export's save dialog, named and placed by Rust, never by the WebView:
 /// in the document's own folder for a file it came from, the last opened PDF's
 /// for one that has never been saved or does not exist yet.
-pub(super) fn export_dialog(
-    app: &AppHandle,
-    engine: &PdfiumEngine,
+pub(super) async fn pick_export_path(
+    state: &PdfiumState,
+    window: &WebviewWindow,
     document_id: Option<u64>,
     filter_label: String,
-    extensions: &[&str],
-    suggested_name: &str,
-) -> tauri_plugin_dialog::FileDialogBuilder<tauri::Wry> {
-    let dialog = app
-        .dialog()
-        .file()
-        .add_filter(filter_label, extensions)
-        .set_file_name(suggested_file_name(suggested_name));
+    extensions: &'static [&'static str],
+    suggested_name: String,
+) -> Result<DialogOutcome<PathBuf>, String> {
+    let engine = Arc::clone(&state.engine);
+    let app = window.app_handle().clone();
 
-    match document_id
-        .and_then(|id| engine.document_source_dir(id))
-        .or_else(|| app.state::<RecentFiles>().last_opened_dir())
+    match state
+        .run_file_dialog(window, move |dialog| {
+            let dialog = dialog
+                .add_filter(filter_label, extensions)
+                .set_file_name(suggested_file_name(&suggested_name));
+            let dialog = match document_id
+                .and_then(|id| engine.document_source_dir(id))
+                .or_else(|| app.state::<RecentFiles>().last_opened_dir())
+            {
+                Some(directory) => dialog.set_directory(directory),
+                None => dialog,
+            };
+
+            dialog.blocking_save_file()
+        })
+        .await?
     {
-        Some(directory) => dialog.set_directory(directory),
-        None => dialog,
+        DialogOutcome::Picked(picked) => picked
+            .into_path()
+            .map(DialogOutcome::Picked)
+            .map_err(|error| format!("the chosen destination is unusable: {error}")),
+        DialogOutcome::Cancelled => Ok(DialogOutcome::Cancelled),
+        DialogOutcome::Busy => Ok(DialogOutcome::Busy),
     }
 }
 
@@ -900,27 +931,24 @@ pub async fn export_pdf(
     filter_label: String,
     app: AppHandle,
     state: State<'_, PdfiumState>,
+    window: WebviewWindow,
 ) -> Result<Option<ExportOutcome>, String> {
+    let path = match pick_export_path(
+        &state,
+        &window,
+        Some(document_id),
+        filter_label,
+        &["pdf"],
+        suggested_name,
+    )
+    .await?
+    {
+        DialogOutcome::Picked(path) => path,
+        DialogOutcome::Cancelled | DialogOutcome::Busy => return Ok(None),
+    };
     let engine = Arc::clone(&state.engine);
 
-    // `blocking_save_file` would deadlock the main thread outside
-    // `spawn_blocking`; the document lock is not taken until the reader chooses.
     tauri::async_runtime::spawn_blocking(move || {
-        let Some(picked) = export_dialog(
-            &app,
-            &engine,
-            Some(document_id),
-            filter_label,
-            &["pdf"],
-            &suggested_name,
-        )
-        .blocking_save_file() else {
-            return Ok(None);
-        };
-        let path = picked
-            .into_path()
-            .map_err(|error| format!("the chosen destination is unusable: {error}"))?;
-
         export_and_bind(&app, &engine, document_id, path).map(Some)
     })
     .await
@@ -932,7 +960,7 @@ pub async fn export_pdf(
 /// path `find_open_file` looks it up by — the OS's own, as the outcome's string
 /// is lossy. Moved straight after the write, so the gap an open could slip
 /// through is as short as it can be outside the documents lock.
-pub(super) fn export_and_bind(
+fn export_and_bind(
     app: &AppHandle,
     engine: &PdfiumEngine,
     document_id: u64,
@@ -947,83 +975,6 @@ pub(super) fn export_and_bind(
     }
 
     Ok(outcome)
-}
-
-/// Where a new PDF goes, asked before it is built: a cancelled dialog costs no
-/// build. The dialog is the caller's own, since a path argument would be an
-/// arbitrary-file write for any page code. `None` also for a page that reloaded
-/// or closed meanwhile, which has nothing left to show the PDF in.
-pub(super) async fn pick_new_pdf(
-    app: &AppHandle,
-    document_id: Option<u64>,
-    filter_label: String,
-    suggested_name: String,
-    window: &WebviewWindow,
-    page: PageGeneration,
-) -> Result<Option<PathBuf>, String> {
-    let engine = Arc::clone(&app.state::<PdfiumState>().engine);
-    let dialog_app = app.clone();
-    // `blocking_save_file` would deadlock the main thread outside `spawn_blocking`.
-    let picked = tauri::async_runtime::spawn_blocking(move || {
-        export_dialog(
-            &dialog_app,
-            &engine,
-            document_id,
-            filter_label,
-            &["pdf"],
-            &suggested_name,
-        )
-        .blocking_save_file()
-    })
-    .await
-    .map_err(|error| format!("dialog task failed: {error}"))?;
-    let Some(picked) = picked.filter(|_| page_generation(window) == page) else {
-        return Ok(None);
-    };
-
-    picked
-        .into_path()
-        .map(Some)
-        .map_err(|error| format!("the chosen destination is unusable: {error}"))
-}
-
-/// A document just built for the window, recorded as its own and written to
-/// `path`, which it is then bound to: it opens as that file's tab, as an open
-/// of it would. `None` for a page that reloaded or closed meanwhile, which has
-/// already closed it; an unwritten one is closed, having no file to show.
-pub(super) async fn bind_new_document(
-    document: PdfDocumentInfo,
-    path: PathBuf,
-    app: AppHandle,
-    window: &WebviewWindow,
-    page: PageGeneration,
-) -> Result<Option<PdfDocumentInfo>, String> {
-    let owners = app.state::<DocumentOwners>();
-
-    record_document(&owners, window, page, document.id(), DocumentFile::None);
-
-    if !owners.owns(document.id(), window.label()) {
-        return Ok(None);
-    }
-
-    let id = document.id();
-    let engine = Arc::clone(&app.state::<PdfiumState>().engine);
-    let shown = path.to_string_lossy().into_owned();
-    let task_app = app.clone();
-    let written =
-        tauri::async_runtime::spawn_blocking(move || export_and_bind(&task_app, &engine, id, path))
-            .await
-            .map_err(|error| format!("PDFium export task failed: {error}"));
-
-    match written {
-        Ok(Ok(_)) => Ok(Some(document.bound_to(shown))),
-        Ok(Err(error)) | Err(error) => {
-            owners.release(id);
-            app.state::<PdfiumState>().close_document_detached(id);
-
-            Err(error)
-        }
-    }
 }
 
 /// `export_pdf` past its dialog, which no driver can answer. Taking the path

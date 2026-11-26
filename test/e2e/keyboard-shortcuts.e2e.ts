@@ -136,9 +136,10 @@ describe("TFolio keyboard shortcuts", () => {
     await openPdfFromDisk("shortcuts.pdf", textPdf())
     await renderedVisiblePage("shortcuts.pdf")
 
-    const print = await appMenuItem("print")
-    await expect(print).toHaveText(expect.stringContaining("Ctrl+P"))
-    await closeAppMenu(print)
+    const saveAs = await appMenuItem("save-as")
+    await expect(saveAs).toHaveText(expect.stringContaining("Ctrl+Shift+S"))
+    await expect($("[data-action='print']")).not.toExist()
+    await closeAppMenu(saveAs)
 
     expect(await tooltipOn("[data-slot='pdf-search-trigger']")).toContain(
       "Ctrl+F",
@@ -181,8 +182,7 @@ describe("TFolio keyboard shortcuts", () => {
     expect(await tooltipOn(`${visible} button[aria-label='Zoom in']`)).toContain("Ctrl+=")
   })
 
-  it("opens the layer dialogs without starting a print", async () => {
-    // ctrl+alt+p is the page numbers, not the ctrl+p that lays out the pages.
+  it("opens the layer dialogs with their chords", async () => {
     await browser.keys(["Control", "Alt", "w"])
     await expect($("[role='dialog']")).toHaveText(
       expect.stringContaining("Document watermark"),

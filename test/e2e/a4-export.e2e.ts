@@ -1,15 +1,16 @@
+import { existsSync } from "node:fs"
 import path from "node:path"
 import { $, $$, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
-import type { E2eOverrides } from "../../src/lib/e2e"
 import {
   activeSidebar,
-  deletePageFromSidebar,
+  clickAppMenuItem,
   minimalPdf,
   openPdfFromDisk,
   outlinedPdf,
   pointMultiPickerAt,
+  pointSaveAsAt,
   refreshApp,
   renderedPage,
   seedSettings,
@@ -17,39 +18,17 @@ import {
 } from "./helpers"
 
 const session = "[data-document-session][data-active='true']"
+const saveTrigger = `${session} [data-slot='pdf-save-trigger']`
 
-/** Answers the A4 copy's dialog with `destination` and runs the real write
-    behind it, through the command the e2e build keeps for this. */
-async function pointA4At(destination: string) {
-  await browser.execute((target: string) => {
-    const seam = window as unknown as Window & {
-      __tfolioE2E?: E2eOverrides
-      __TAURI_INTERNALS__: { invoke: (command: string, args?: unknown) => Promise<unknown> }
-    }
-
-    seam.__tfolioE2E = {
-      ...seam.__tfolioE2E,
-      saveA4Pdf: ({ documentId, onProgress }) =>
-        seam.__TAURI_INTERNALS__.invoke("save_a4_pdf_to", {
-          documentId,
-          onProgress,
-          path: target,
-        }) as ReturnType<NonNullable<E2eOverrides["saveA4Pdf"]>>,
-    }
-  }, destination)
-}
-
-async function saveAsA4(destination: string) {
-  await pointA4At(destination)
-  await $(`${session} [data-slot='pdf-save-menu-trigger']`).click()
-  await $("[data-action='save-a4']").click()
+async function fitToA4(expectedTabName: string) {
+  await clickAppMenuItem("fit-a4")
   await expect($("[data-testid='a4-dialog']")).toBeDisplayed()
-  await $("[data-testid='a4-save']").click()
+  await $("[data-testid='a4-start']").click()
+  await $("[data-testid='a4-dialog']").waitForExist({ reverse: true, timeout: 30_000 })
   await browser.waitUntil(
     async () =>
-      (await $$(`//button[@role='tab'][normalize-space()='${path.basename(destination)}']`)
-        .length) === 1,
-    { timeout: 30_000, timeoutMsg: "the tab never showed the A4 copy" },
+      (await $$(`//button[@role='tab'][normalize-space()='${expectedTabName}']`).length) === 1,
+    { timeout: 30_000, timeoutMsg: "the unsaved A4 tab never opened" },
   )
 }
 
@@ -64,7 +43,7 @@ function pageShapes() {
   session)
 }
 
-describe("TFolio save as A4", () => {
+describe("TFolio fit to A4", () => {
   beforeEach(async () => {
     await seedSettings({
       organize: { smartPadding: true },
@@ -73,60 +52,46 @@ describe("TFolio save as A4", () => {
     await refreshApp()
   })
 
-  it("fits every page onto A4 in a new file, which the tab then shows", async () => {
+  it("fits every page onto A4 in a new unsaved tab while keeping the original, then lets the reader save manually", async () => {
     const own = await openPdfFromDisk("small.pdf", minimalPdf(2, "0 0 200 200"))
     await renderedPage()
     expect(await pageShapes()).toEqual([100, 100])
 
-    await saveAsA4(path.join(path.dirname(own), "small-A4.pdf"))
+    await fitToA4("small-A4.pdf")
     await browser.waitUntil(async () => (await pageShapes()).join() === "141,141", {
       timeoutMsg: "the pages never stood on A4",
     })
-    expect((await $$("[data-document-tab]").getElements()).length).toBe(1)
-  })
+    expect((await $$("[data-document-tab]").getElements()).length).toBe(2)
 
-  it("opens the copy beside a document with unsaved changes, which stays", async () => {
-    const own = await openPdfFromDisk("edited.pdf", minimalPdf(3))
-    await renderedPage()
-    await deletePageFromSidebar(1)
+    const a4Tab = $("//button[@role='tab'][normalize-space()='small-A4.pdf']")
+    await expect(a4Tab).toHaveAttribute("aria-selected", "true")
+    await expect(a4Tab.$("[aria-label='Unsaved changes']")).toBeExisting()
+    await expect($("//button[@role='tab'][normalize-space()='small.pdf']")).toExist()
 
-    await pointA4At(path.join(path.dirname(own), "edited-A4.pdf"))
-    await $(`${session} [data-slot='pdf-save-menu-trigger']`).click()
-    await $("[data-action='save-a4']").click()
-    await expect($("[data-testid='a4-keeps-original']")).toBeDisplayed()
-    await $("[data-testid='a4-save']").click()
+    // Unsaved A4 copy has no file on disk yet; toolbar save acts as Save As.
+    await expect($(saveTrigger)).toHaveAttribute("data-save-as-only", "")
+    await expect($(saveTrigger)).toBeEnabled()
 
+    const destination = path.join(path.dirname(own), "small-A4.pdf")
+    expect(existsSync(destination)).toBe(false)
+
+    await pointSaveAsAt(destination)
+    await $(saveTrigger).click()
     await browser.waitUntil(
-      async () => (await $$("[data-document-tab]").getElements()).length === 2,
-      { timeout: 30_000, timeoutMsg: "the copy never opened beside the document" },
+      async () => !(await a4Tab.$("[aria-label='Unsaved changes']").isExisting()),
+      { timeout: 15_000, timeoutMsg: "manual save never marked the A4 tab clean" },
     )
-    await expect($("//button[@role='tab'][normalize-space()='edited-A4.pdf']")).toHaveAttribute(
-      "aria-selected",
-      "true",
-    )
-    await expect($("//button[@role='tab'][normalize-space()='edited.pdf']")).toExist()
-  })
+    expect(existsSync(destination)).toBe(true)
 
-  it("names a refusal beside its button: a copy over a file open in another tab", async () => {
-    const other = await openPdfFromDisk("other.pdf", minimalPdf(1))
-    await openPdfFromDisk("own.pdf", minimalPdf(1, "0 0 200 200"))
-    // Two tabs: the hidden one's page would answer a wait for a rendered page.
-    await expect($("//button[@role='tab'][normalize-space()='own.pdf']")).toHaveAttribute(
-      "aria-selected",
-      "true",
-    )
-
-    await pointA4At(other)
-    await $(`${session} [data-slot='pdf-save-menu-trigger']`).click()
-    await $("[data-action='save-a4']").click()
-    await $("[data-testid='a4-save']").click()
-    await expect($("[data-testid='a4-dialog'] [role='alert']")).toHaveText(
-      expect.stringContaining("open in another tab"),
-    )
+    // The original tab stayed untouched beside it.
+    await $("//button[@role='tab'][normalize-space()='small.pdf']").click()
+    await browser.waitUntil(async () => (await pageShapes()).join() === "100,100", {
+      timeoutMsg: "the original tab did not keep its square pages",
+    })
   })
 
   it("keeps the blanks between files and a bookmark for each", async () => {
-    const own = await openPdfFromDisk("own.pdf", minimalPdf(1))
+    await openPdfFromDisk("own.pdf", minimalPdf(1))
     await pointMultiPickerAt([writeScratchPdf("added.pdf", outlinedPdf())])
     await $(`${activeSidebar} [data-slot='sidebar-add-files']`).click()
     await browser.waitUntil(async () =>
@@ -139,9 +104,9 @@ describe("TFolio save as A4", () => {
         .then((count) => count === 3),
     )
 
-    await saveAsA4(path.join(path.dirname(own), "combined-A4.pdf"))
+    await fitToA4("own-A4.pdf")
     await browser.waitUntil(async () => (await pageShapes()).length === 4, {
-      timeoutMsg: "the blank between the files was not written",
+      timeoutMsg: "the blank between the files was not created",
     })
     await $(`${activeSidebar} button[aria-label='Outline']`).click()
     const bookmarks = $(`${activeSidebar} nav[aria-label='Bookmarks']`)

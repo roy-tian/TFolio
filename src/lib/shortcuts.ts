@@ -28,7 +28,6 @@ export const shortcuts = {
   newWindow: { key: "n", shift: true },
   open: { key: "o" },
   pageNumbers: { alt: true, key: "p" },
-  print: { key: "p" },
   redo: { key: "z", shift: true },
   save: { key: "s" },
   saveAll: { alt: true, key: "s" },
@@ -98,6 +97,26 @@ export function matchesShortcut(
     event.altKey === Boolean(shortcut.alt) &&
     event.shiftKey === Boolean(shortcut.shift) &&
     namesLetter(event, shortcut.key)
+  )
+}
+
+/**
+ * Matches the WebView's own print chords — Ctrl+P / Cmd+P and Chromium's
+ * Ctrl+Shift+P system print dialog, including non-Latin keyboard layouts —
+ * while leaving Alt+P (page numbers) untouched.
+ */
+export function isWebViewPrintChord(
+  event: ShortcutEvent,
+  macOS = isMacOS(),
+) {
+  const primary = macOS ? event.metaKey : event.ctrlKey
+  const foreign = macOS ? event.ctrlKey : event.metaKey
+
+  return (
+    primary &&
+    !foreign &&
+    !event.altKey &&
+    (event.key.toLowerCase() === "p" || event.code === "KeyP")
   )
 }
 

@@ -158,9 +158,9 @@
 ## PDF editing and cancellation
 
 - Only PDFium parses opened PDFs. `lopdf` may parse freshly saved PDFium output for what PDFium
-  cannot do: writing outlines, relinking bookmarks and split links, recompressing images, drawing
-  signature widgets into their pages (`FPDFPage_Flatten` burns or drops every annotation),
-  dropping the links a page copy keeps into its source.
+  cannot do: writing outlines, relinking bookmarks and split links, deduplicating objects and
+  recompressing images, drawing signature widgets into their pages (`FPDFPage_Flatten` burns or
+  drops every annotation), dropping the links a page copy keeps into its source.
 - `FPDF_ImportPages` leaves references into the source (`/Parent`, `/Prev`, `/First`, arrays it
   half-copied) that a save follows once the source closes, crashing the app: `reread` the document
   that took pages before what it took them from closes, and copy through `detached_pages` where
@@ -187,7 +187,7 @@
   for added files) and enforces; a document flattens in place only before its first change, and a
   new file flattens its own copy.
 
-## Save as A4
+## Fit to A4
 
 - `fit_to_a4` builds a copy of every page fitted onto A4 (with the blank pages and per-file
   bookmarks a Save As writes); a form XObject leaves annotations, links and fields behind. This
@@ -195,8 +195,9 @@
   holds, else they scale along and the reader is told) and stamped again on the sheets as the
   copy's own content (`stamp_layers`, which keeps no rollback snapshot of a copy it may discard).
   The stripped copy closes through `MergeDraft`, under the lock, however the run ends.
-  `save_a4_pdf` asks for the destination in Rust first, records the copy with `record_document`,
-  binds it like Save As, and the tab shows it in place of the document it was made from.
+  `fit_a4_pdf` records the unsaved copy with `record_document` (`DocumentFile::None`) without
+  writing to disk, and opens it in a new tab beside the original so the reader can review and save
+  manually.
 
 ## Files added to a document
 
@@ -229,8 +230,8 @@
   (`combined_bytes`), and a split by bookmarks cuts at the outline it writes, which the engine
   reports as `splitsByBookmarks`.
 - Blank pages between files are never pages of the document: the engine reports where a Save As
-  will put them (`SectionBook::padding`) with every structure change, the viewer, sidebar and
-  print show them there, and only a Save As writes them. Structure commands never see them. A
+  will put them (`SectionBook::padding`) with every structure change, the viewer and sidebar show
+  them there, and only a Save As writes them. Structure commands never see them. A
   drag of pages shows them where its drop would leave them by the same rule (`paddingPositions`,
   kept in step with `SectionBook::padding`); a file carried by its name folds them away with
   every file's pages until it lands.
@@ -253,8 +254,9 @@
   from another tab and a new PDF of pages ask); a cut pasted there is deleted by the document it
   was made in, queued there as the copy starts and made once it lands, one undo in each. A cut of
   every page its document has stays there too, and the corner says so (`pagesCutKept`).
-- A document with no file of its own has Save As for its save button and key, as one holding
-  foreign pages has (`saveAsOnly`); the menu's Save stays disabled.
+- A document that cannot overwrite its own file — sourceless, holding foreign or merged pages,
+  carrying watermark or page numbers, or an edited signed file — has Save As for its toolbar save
+  button and key (`saveAsOnly`); the menu's Save stays disabled.
 - A file folded to its name is one cell of the flow standing for its pages (`data-flip-bar`,
   `flowItems`): a drop lands above or below it, never inside. `flowLanding` counts cells, so
   every landing goes through `pagesBeforeSlot` before it names a page. Folding is a tab's own

@@ -1,4 +1,4 @@
-use super::owned_content::OwnedTailState;
+use super::owned_content::{OwnedTailState, PageNumberStamp};
 use super::page_import::{copied_pages, detached_bytes, detached_pages, lent_copy, ImportRollback};
 use super::*;
 
@@ -48,6 +48,8 @@ pub(super) struct StashedPage {
     pub(super) marks: Vec<u64>,
     pub(super) revision: u64,
     pub(super) owned: Option<OwnedTailState>,
+    pub(super) page_number_stamp: Option<PageNumberStamp>,
+    pub(super) padding_number: Option<PaddingPageNumber>,
     /// Whether the page is a copy of owned content, so a restore puts it
     /// back into the set that forbids overwriting the document's file.
     pub(super) merged: bool,
@@ -246,6 +248,7 @@ impl PdfiumEngine {
             // them still changes which file they belong to.
             if let (Some(book), Some(layout)) = (entry.sections.as_mut(), sections) {
                 book.set_layout(&entry.page_ids, layout);
+                entry.content_changed();
             }
 
             return Ok(structure_update(entry));
@@ -408,6 +411,14 @@ impl PdfiumEngine {
                     .owned_content
                     .as_mut()
                     .and_then(|state| state.per_page.remove(&page_id)),
+                page_number_stamp: entry
+                    .owned_content
+                    .as_mut()
+                    .and_then(|state| state.page_number_stamps.remove(&page_id)),
+                padding_number: entry
+                    .owned_content
+                    .as_mut()
+                    .and_then(|state| state.padding_numbers.remove(&page_id)),
                 // A deleted copy leaves the document; the guard follows it out.
                 merged: entry.merged_page_ids.remove(&page_id),
                 foreign: entry.foreign_page_ids.remove(&page_id),
@@ -494,6 +505,7 @@ impl PdfiumEngine {
 
         for stash_id in stash_ids {
             entry.stashes.remove(stash_id);
+            entry.page_number_stashes.remove(stash_id);
         }
 
         Ok(())
@@ -565,6 +577,16 @@ impl PdfiumEngine {
             for stashed in &stash.pages {
                 if let Some(tail) = &stashed.owned {
                     prospective.per_page.insert(stashed.page_id, tail.clone());
+                }
+                if let Some(stamp) = &stashed.page_number_stamp {
+                    prospective
+                        .page_number_stamps
+                        .insert(stashed.page_id, stamp.clone());
+                }
+                if let Some(number) = &stashed.padding_number {
+                    prospective
+                        .padding_numbers
+                        .insert(stashed.page_id, number.clone());
                 }
             }
 

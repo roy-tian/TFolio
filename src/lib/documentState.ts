@@ -120,7 +120,33 @@ function layoutKey(state: DocumentState, ...also: unknown[]) {
   return JSON.stringify([asOpened ? null : tokens, turns, ...also])
 }
 
-function apply(state: DocumentState, entry: AnnotationEntry) {
+/** Marks live when `entry` ran: erasing a mark later removes its entry from
+    `past` before `entry`, leaving only its `eraseAnnotation` after `entry`. */
+function marksAt(
+  state: DocumentState,
+  entry: AnnotationEntry,
+  entryIndex: number,
+  past: AnnotationEntry[],
+) {
+  const marks = [...state.marks]
+
+  for (let index = entryIndex + 1; index < past.length; index += 1) {
+    const later = past[index]!.command
+
+    if (later.kind === "eraseAnnotation" && later.target.id < entry.id) {
+      marks.push(later.target.id)
+    }
+  }
+
+  return marks.sort((left, right) => left - right)
+}
+
+function apply(
+  state: DocumentState,
+  entry: AnnotationEntry,
+  entryIndex: number,
+  past: AnnotationEntry[],
+) {
   const { command } = entry
 
   switch (command.kind) {
@@ -134,11 +160,16 @@ function apply(state: DocumentState, entry: AnnotationEntry) {
     case "watermark":
       state.watermark = command.config && { config: command.config, over: layoutKey(state) }
       return
-    // Their ink is sampled over the watermark beneath them.
+    // Their ink and numbering follow the watermark, marks, and padding state.
     case "pageNumbers":
       state.pageNumbers = command.config && {
         config: command.config,
-        over: layoutKey(state, state.watermark),
+        over: layoutKey(
+          state,
+          state.watermark,
+          marksAt(state, entry, entryIndex, past),
+          changedTo(state.fileOptions, sameFileOptions)?.to ?? null,
+        ),
       }
       return
     case "fileOptions":
@@ -197,8 +228,8 @@ export function documentState(past: AnnotationEntry[]): DocumentState {
     watermark: null,
   }
 
-  for (const entry of past) {
-    apply(state, entry)
+  for (let index = 0; index < past.length; index += 1) {
+    apply(state, past[index]!, index, past)
 
     if (state.opaque) {
       break

@@ -1,6 +1,5 @@
-import { useRef, useState } from "react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { invoke } from "@tauri-apps/api/core"
 
 import { OperationProgress } from "@/components/OperationProgress"
 import { Button } from "@/components/ui/button"
@@ -15,8 +14,8 @@ import {
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import type { useAnnotations } from "@/hooks/useAnnotations"
+import { useExportDialogRun } from "@/hooks/useExportDialogRun"
 import type { PdfDocumentInfo } from "@/lib/pdf"
-import type { PdfProgress } from "@/lib/progress"
 
 type SplitMode = "bookmarks" | "pages"
 
@@ -39,34 +38,27 @@ export function SplitPdfDialog({
   const { t } = useTranslation()
   const hasBookmarks = document.splitsByBookmarks
   const [mode, setMode] = useState<SplitMode>(hasBookmarks ? "bookmarks" : "pages")
-  const [busy, setBusy] = useState(false)
-  const [stopping, setStopping] = useState(false)
   const [failed, setFailed] = useState(false)
-  const [progress, setProgress] = useState<PdfProgress | null>(null)
-  const stopRequested = useRef(false)
-
-  const cancel = async () => {
-    if (await invoke<boolean>("cancel_pdf_archive", { documentId: document.id }).catch(() => false)) {
-      stopRequested.current = false
-    }
-  }
+  const { busy, progress, requestStop, run, stopping } = useExportDialogRun(
+    document.id,
+    "cancel_pdf_archive",
+  )
 
   const start = async () => {
-    setBusy(true)
-    setFailed(false)
-    setProgress(null)
-    stopRequested.current = false
-    const outcome = await onExport({
-      options: mode === "bookmarks" ? { format: "bookmarks" } : { format: "pages" },
-      filterLabel: t("splitExport.filter"),
-      suggestedName: `${suggestedName.replace(/\.pdf$/i, "")}-${t("splitExport.suffix")}.zip`,
-    }, (next) => {
-      setProgress(next)
-      if (stopRequested.current) void cancel()
+    const result = await run((onProgress) => {
+      setFailed(false)
+      return onExport(
+        {
+          options: mode === "bookmarks" ? { format: "bookmarks" } : { format: "pages" },
+          filterLabel: t("splitExport.filter"),
+          suggestedName: `${suggestedName.replace(/\.pdf$/i, "")}-${t("splitExport.suffix")}.zip`,
+        },
+        onProgress,
+      )
     })
-    setBusy(false)
-    setStopping(false)
-    if (outcome === "failed") setFailed(true)
+
+    if (!result.ran || result.outcome === "busy") return
+    if (result.outcome === "failed") setFailed(true)
     else onClose()
   }
 
@@ -116,11 +108,12 @@ export function SplitPdfDialog({
             </span>
           </Label>
         </RadioGroup>
-        {mode === "bookmarks" ? (
-          <p className="text-xs leading-relaxed text-muted-foreground">
-            {t("splitExport.bookmarksSizeHint")}
-          </p>
-        ) : null}
+        <p
+          data-testid="split-warning"
+          className="text-xs leading-relaxed text-muted-foreground"
+        >
+          {t("splitExport.sizeHint")}
+        </p>
         {failed ? (
           <p role="alert" className="text-sm text-destructive">
             {t("splitExport.failed")}
@@ -142,9 +135,7 @@ export function SplitPdfDialog({
                 onClose()
                 return
               }
-              stopRequested.current = true
-              setStopping(true)
-              void cancel()
+              requestStop()
             }}
             data-testid="split-export-cancel"
           >

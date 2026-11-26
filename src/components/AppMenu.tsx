@@ -1,7 +1,6 @@
 import {
   AppWindow,
   FileImage,
-  FileOutput,
   FilePlus2,
   FileStack,
   FolderOpen,
@@ -9,7 +8,6 @@ import {
   Info,
   LogOut,
   Menu,
-  Printer,
   RectangleVertical,
   Save,
   SaveAll,
@@ -74,11 +72,10 @@ type AppMenuProps = AppMenuActions & {
   onAddFiles?: () => void
   onSave?: () => void
   onSaveAs?: () => void
-  onSaveA4?: () => void
+  onFitA4?: () => void
   onExportImages?: () => void
   onSplit?: () => void
   onCompress?: () => void
-  onPrint?: () => void
   saveHint?: string
 }
 
@@ -97,12 +94,11 @@ export function AppMenu({
   onSave,
   onSaveAll,
   onSaveAs,
-  onSaveA4,
+  onFitA4,
   onShowSettings,
   onExportImages,
   onSplit,
   onCompress,
-  onPrint,
   recentFiles,
   saveHint,
 }: AppMenuProps) {
@@ -231,61 +227,6 @@ export function AppMenu({
               {formatShortcut(shortcuts.saveAs)}
             </DropdownMenuShortcut>
           </DropdownMenuItem>
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger
-              className="data-disabled:opacity-50"
-              data-action="export"
-              disabled={!onSaveA4 && !onExportImages && !onSplit && !onCompress}
-            >
-              <FileOutput />
-              {t("menu.export")}
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent>
-              <DropdownMenuItem
-                data-action="save-a4"
-                disabled={!onSaveA4}
-                onClick={onSaveA4}
-              >
-                <RectangleVertical />
-                {t("a4Export.menuLabel")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                data-action="export-images"
-                disabled={!onExportImages}
-                onClick={onExportImages}
-              >
-                <FileImage />
-                {t("imageExport.menuLabel")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                data-action="split"
-                disabled={!onSplit}
-                onClick={onSplit}
-              >
-                <Scissors />
-                {t("splitExport.menuLabel")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                data-action="compress"
-                disabled={!onCompress}
-                onClick={onCompress}
-              >
-                <Shrink />
-                {t("compressExport.menuLabel")}
-              </DropdownMenuItem>
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-          <DropdownMenuItem
-            data-action="print"
-            disabled={!onPrint}
-            onClick={onPrint}
-          >
-            <Printer />
-            {t("print.open")}
-            <DropdownMenuShortcut>
-              {formatShortcut(shortcuts.print)}
-            </DropdownMenuShortcut>
-          </DropdownMenuItem>
           <DropdownMenuItem
             data-action="close-all"
             disabled={!canCloseAll}
@@ -293,6 +234,43 @@ export function AppMenu({
           >
             <SquareX />
             {t("menu.closeAll")}
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+
+        <DropdownMenuSeparator />
+
+        <DropdownMenuGroup>
+          <DropdownMenuItem
+            data-action="fit-a4"
+            disabled={!onFitA4}
+            onClick={onFitA4}
+          >
+            <RectangleVertical />
+            {t("a4Export.menuLabel")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            data-action="export-images"
+            disabled={!onExportImages}
+            onClick={onExportImages}
+          >
+            <FileImage />
+            {t("imageExport.menuLabel")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            data-action="split"
+            disabled={!onSplit}
+            onClick={onSplit}
+          >
+            <Scissors />
+            {t("splitExport.menuLabel")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            data-action="compress"
+            disabled={!onCompress}
+            onClick={onCompress}
+          >
+            <Shrink />
+            {t("compressExport.menuLabel")}
           </DropdownMenuItem>
         </DropdownMenuGroup>
 

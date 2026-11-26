@@ -1,8 +1,11 @@
-//! A copy of a document with every page fitted onto A4, which the reader's tab
-//! then shows as the file it was saved to.
+//! An in-memory copy of a document with every page fitted onto A4, which opens
+//! in a new unsaved tab for the reader to inspect and save manually.
 
 use super::archive_export::section_outline;
-use super::io::{append_page_fitted_to_a4, MergeDraft, EXPORT_DOCUMENT_CHANGED_ERROR};
+use super::io::{
+    append_page_fitted_to_a4, MergeDraft, PaddingSheetSpec, EXPORT_DOCUMENT_CHANGED_ERROR,
+};
+use super::owned_content::PageNumbersPlan;
 use super::*;
 
 /// An A4 copy as `fit_to_a4` opens it.
@@ -45,25 +48,36 @@ impl PdfiumEngine {
                 )
             });
 
-            // Each blank turned as the sheet of the page it backs.
+            // Each blank turned as the sheet of the page it backs, carrying any
+            // page number Save As would stamp on it.
             let sheets: Vec<_> = padding
                 .iter()
                 .map(|after| {
+                    let page_id = entry.page_ids[*after];
                     let shown = entry
                         .page_geometry
-                        .get(&entry.page_ids[*after])
+                        .get(&page_id)
                         .copied()
                         .unwrap_or(UNMEASURED_PAGE);
                     let sheet = a4_placement(shown.width, shown.height);
+                    let page_number = entry
+                        .owned_content
+                        .as_ref()
+                        .and_then(|state| state.padding_numbers.get(&page_id).cloned());
 
-                    (*after, sheet.sheet_width, sheet.sheet_height)
+                    PaddingSheetSpec {
+                        after: *after,
+                        width: sheet.sheet_width,
+                        height: sheet.sheet_height,
+                        page_number,
+                    }
                 })
                 .collect();
             // Taken before the copies, the last things here that can fail: once
             // made, a copy closes by taking the lock this block holds.
             let layers = (
                 self.existing_watermark(entry)?,
-                self.existing_page_numbers(entry)?,
+                self.a4_page_numbers(entry)?,
             );
             // Never beside a layered copy: a layer is an edit, and an edit
             // flattens the signatures in place first.
@@ -98,7 +112,7 @@ impl PdfiumEngine {
         let (watermark, page_numbers) = if layered.is_some() {
             layers
         } else {
-            (None, None)
+            (None, PageNumbersPlan::None)
         };
         // A stamping makes two passes over the pages: planned, then laid.
         let stamped_steps = if watermark.is_some() || page_numbers.is_some() {
@@ -167,9 +181,8 @@ impl PdfiumEngine {
 
             bytes
         };
-        // Laid out for the A4 sheets, as a layer applied to them would be, and
-        // before the blanks go in: a Save As leaves those bare, neither numbered
-        // nor counted.
+        // Laid out for the A4 sheets, preserving the reader's numbers; padding
+        // blanks go in next with any numbers planned for them, matching Save As.
         let bytes = if watermark.is_some() || page_numbers.is_some() {
             let plain = self.open_with_source(bytes, None)?;
             // Scaled onto those steps, so the bar ends full whatever it counts.

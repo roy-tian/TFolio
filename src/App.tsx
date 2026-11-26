@@ -45,6 +45,7 @@ import { SidebarContext, useSidebarState } from "@/hooks/useSidebar"
 import { OPEN_FILES_AT_ONCE } from "@/lib/batchLimits"
 import { hasLayerOverWorkspace, isTypingTarget } from "@/lib/contextMenu"
 import { e2eOverride, isE2eBuild } from "@/lib/e2e"
+import { createSingleFlightGate } from "@/lib/fileDialogGate"
 import { dropHit, dropPointInCss, sidebarShown } from "@/lib/fileDrop"
 import { mergeFiles } from "@/lib/fileSources"
 import {
@@ -91,6 +92,7 @@ import {
   type RecentPdfView,
 } from "@/lib/recentFiles"
 import {
+  isWebViewPrintChord,
   matchesShortcut,
   shortcuts,
   zoomShortcut,
@@ -240,7 +242,7 @@ export default function App() {
   const sessionRefs = useRef(new Map<number, DocumentSessionHandle>())
   const openChainRef = useRef<Promise<void>>(Promise.resolve())
   const openBatchesRef = useRef(0)
-  const choosingFileRef = useRef(false)
+  const [openPickerGate] = useState(createSingleFlightGate)
   const mountedRef = useRef(true)
   const activeIdRef = useRef<TabId>(HOME_TAB_ID)
   // A tab drag that left the strip: where this window's viewport sits on the
@@ -611,9 +613,6 @@ export default function App() {
     [notices, reloadTab, runOpenBatch],
   )
 
-  // Save as A4's copy, written and bound to its file, takes the tab's place:
-  // the tab shows that file as an open of it would, the old document closing
-  // with its session.
   const tabHasUnsavedWork = useCallback(
     (documentId: number) =>
       sessionRefs.current.get(documentId)?.hasUnsavedWorkNow() ??
@@ -621,43 +620,37 @@ export default function App() {
     [],
   )
 
-  // A document with unsaved work keeps its tab: the copy cannot carry its
-  // annotations, so they would be gone for good. The copy opens beside it.
-  const replaceWithWritten = useCallback(
-    (documentId: number, document: PdfDocumentInfo) => {
-      const path = document.path
-
-      if (!mountedRef.current || !path) {
+  // Fit to A4 opens as a new unsaved tab right beside the document it came
+  // from, keeping the original tab untouched so the reader can compare and
+  // save manually when ready.
+  const openA4Tab = useCallback(
+    (sourceDocumentId: number, document: PdfDocumentInfo, name: string) => {
+      if (!mountedRef.current) {
         void invoke("close_pdf", { documentId: document.id }).catch(() => undefined)
         return
       }
 
       const tab: OpenTab = {
-        dirty: false,
+        dirty: true,
         document,
         id: document.id,
-        name: fileNameFromPath(path),
-        path,
-        recentPath: path,
+        initialSaveRequired: true,
+        name,
+        path: "",
+        saveAsDefaultName: name,
         savable: false,
       }
 
-      if (tabHasUnsavedWork(documentId)) {
-        replaceTabs((current) => {
-          const at = current.findIndex((item) => item.id === documentId)
+      replaceTabs((current) => {
+        const at = current.findIndex((item) => item.id === sourceDocumentId)
 
-          return at < 0
-            ? [...current, tab]
-            : [...current.slice(0, at + 1), tab, ...current.slice(at + 1)]
-        })
-        activateTab(tab.id)
-      } else {
-        putInPlaceOf(documentId, tab)
-      }
-
-      refreshRecentFiles()
+        return at < 0
+          ? [...current, tab]
+          : [...current.slice(0, at + 1), tab, ...current.slice(at + 1)]
+      })
+      activateTab(tab.id)
     },
-    [activateTab, putInPlaceOf, refreshRecentFiles, replaceTabs, tabHasUnsavedWork],
+    [activateTab, replaceTabs],
   )
 
   const tabName = useCallback(
@@ -1241,29 +1234,36 @@ export default function App() {
   )
 
   const chooseFile = useCallback(async () => {
-    if (choosingFileRef.current) {
+    const releaseDialog = openPickerGate.acquire()
+
+    if (!releaseDialog) {
       return
     }
 
-    choosingFileRef.current = true
+    let path: string | null
 
     try {
       const pick = e2eOverride("pickPdfPath")
-      const path = pick
+      path = pick
         ? await pick()
         : await invoke<string | null>("pick_pdf_path", {
             filterLabel: t("viewer.openFilter"),
           })
-
-      if (typeof path === "string") {
-        await openPaths([path])
-      }
     } catch {
       notices.raise({ kind: "openFailed", owner: workspaceOwner })
+      return
     } finally {
-      choosingFileRef.current = false
+      releaseDialog()
     }
-  }, [notices, openPaths, t])
+
+    if (typeof path === "string") {
+      try {
+        await openPaths([path])
+      } catch {
+        notices.raise({ kind: "openFailed", owner: workspaceOwner })
+      }
+    }
+  }, [notices, openPaths, openPickerGate, t])
 
   const rememberAllViews = useCallback(
     () =>
@@ -1813,40 +1813,21 @@ export default function App() {
     return () => document.removeEventListener("keydown", openDocumentSearch)
   }, [macOS])
 
-  // The WebView's own print would put the interface on paper, so the key is
-  // consumed everywhere and answered only where there is a document to print.
+  // Printing is not offered; consume the WebView's own print chords (plain,
+  // shifted, and non-Latin layouts) so pressing them never sends the interface
+  // HTML to a printer, while leaving Alt+P (page numbers) untouched.
   useEffect(() => {
-    const printDocument = (event: KeyboardEvent) => {
-      if (
-        event.defaultPrevented ||
-        !matchesShortcut(event, shortcuts.print, macOS)
-      ) {
+    const blockWebViewPrint = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !isWebViewPrintChord(event, macOS)) {
         return
       }
 
       event.preventDefault()
-
-      // Consumed on every repeat, but answered once: a held key must not let
-      // the WebView's own print through, nor lay the pages out again.
-      if (event.repeat) {
-        return
-      }
-
-      // A dialog or popup in front of the document owns the screen — this one
-      // included, while it counts out the pages.
-      if (hasLayerOverWorkspace()) {
-        return
-      }
-
-      const tabId = activeIdRef.current
-      if (tabId !== HOME_TAB_ID) {
-        sessionRefs.current.get(tabId)?.print()
-      }
     }
 
-    document.addEventListener("keydown", printDocument)
+    document.addEventListener("keydown", blockWebViewPrint)
 
-    return () => document.removeEventListener("keydown", printDocument)
+    return () => document.removeEventListener("keydown", blockWebViewPrint)
   }, [macOS])
 
   // Only a document tab's pages zoom; a dialog in front takes the keys from them.
@@ -2526,7 +2507,7 @@ export default function App() {
           onDirtyChange={updateDirty}
           onSavableChange={updateSavable}
           onCombinedSaved={reopenCombinedTab}
-          onReplacedByFile={replaceWithWritten}
+          onOpenedA4={openA4Tab}
           onSourceChange={updateSource}
           ref={(handle) => {
             if (handle) {

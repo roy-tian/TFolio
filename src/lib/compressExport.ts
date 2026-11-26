@@ -1,8 +1,8 @@
-/** Mirrors `CompressionOptions` in `src-tauri/engine/src/pdfium/compress.rs`: the
-    resolution images are resampled toward, in pixels per inch of their drawn
-    size. `null` leaves images untouched. */
+/** Mirrors `CompressionOptions` in `src-tauri/engine/src/pdfium/compress.rs`:
+    image quality percentage (`0..=100`). `100` leaves images untouched and
+    compresses PDF structure alone. */
 export type CompressionOptions = {
-  imageDpi: number | null
+  imageQuality: number
 }
 
 /** Mirrors `CompressionEstimate`; `estimatedBytes` is exactly what the export
@@ -19,14 +19,7 @@ export type CompressedExportRequest = {
   filterLabel: string
 }
 
-/** The dialog's choices, inside the 72–300 dpi the engine enforces on its own. */
-export const IMAGE_QUALITY_LEVELS = [
-  { level: "original", imageDpi: null },
-  { level: "high", imageDpi: 300 },
-  { level: "medium", imageDpi: 150 },
-  { level: "low", imageDpi: 96 },
-] as const
-
-export type ImageQualityLevel = (typeof IMAGE_QUALITY_LEVELS)[number]["level"]
-
-export const DEFAULT_IMAGE_QUALITY: ImageQualityLevel = "medium"
+export const MIN_IMAGE_QUALITY = 0
+export const MAX_IMAGE_QUALITY = 100
+export const IMAGE_QUALITY_STEP = 5
+export const DEFAULT_IMAGE_QUALITY = 60

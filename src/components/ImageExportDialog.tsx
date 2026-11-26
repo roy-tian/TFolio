@@ -1,6 +1,5 @@
-import { useRef, useState } from "react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { invoke } from "@tauri-apps/api/core"
 
 import { OperationProgress } from "@/components/OperationProgress"
 import { Button } from "@/components/ui/button"
@@ -16,11 +15,15 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import type { useAnnotations } from "@/hooks/useAnnotations"
-import type { ImageFormat } from "@/lib/archiveExport"
-import { IMAGE_DPI_CHOICES } from "@/lib/archiveExport"
+import { useExportDialogRun } from "@/hooks/useExportDialogRun"
+import {
+  DEFAULT_IMAGE_RESOLUTION,
+  IMAGE_RESOLUTION_CHOICES,
+  type ImageFormat,
+  type ImageResolution,
+} from "@/lib/archiveExport"
 import type { PdfDocumentInfo } from "@/lib/pdf"
 import { parsePageRange } from "@/lib/pageRange"
-import type { PdfProgress } from "@/lib/progress"
 
 const FORMAT_OPTIONS: Array<{
   format: ImageFormat
@@ -31,12 +34,40 @@ const FORMAT_OPTIONS: Array<{
   { format: "png", labelKey: "imageExport.png", hintKey: "imageExport.pngHint" },
 ]
 
-const DPI_OPTIONS = IMAGE_DPI_CHOICES.map((dpi) => ({
-  dpi,
-  hintKey: `imageExport.dpiHint${dpi}` as `imageExport.dpiHint${typeof dpi}`,
+const RESOLUTION_COPY: Record<
+  ImageResolution,
+  {
+    labelKey:
+      | "imageExport.resolutionHigh"
+      | "imageExport.resolutionMedium"
+      | "imageExport.resolutionLow"
+    hintKey:
+      | "imageExport.resolutionHighHint"
+      | "imageExport.resolutionMediumHint"
+      | "imageExport.resolutionLowHint"
+  }
+> = {
+  high: {
+    labelKey: "imageExport.resolutionHigh",
+    hintKey: "imageExport.resolutionHighHint",
+  },
+  medium: {
+    labelKey: "imageExport.resolutionMedium",
+    hintKey: "imageExport.resolutionMediumHint",
+  },
+  low: {
+    labelKey: "imageExport.resolutionLow",
+    hintKey: "imageExport.resolutionLowHint",
+  },
+}
+
+const RESOLUTION_OPTIONS = IMAGE_RESOLUTION_CHOICES.map((choice) => ({
+  ...choice,
+  ...RESOLUTION_COPY[choice.key],
 }))
 
-const DEFAULT_DPI = 150
+const DEFAULT_IMAGE_DPI =
+  IMAGE_RESOLUTION_CHOICES.find((choice) => choice.key === DEFAULT_IMAGE_RESOLUTION)!.dpi
 
 type ImageExportDialogProps = {
   document: PdfDocumentInfo
@@ -56,13 +87,13 @@ export function ImageExportDialog({
 }: ImageExportDialogProps) {
   const { t } = useTranslation()
   const [imageFormat, setImageFormat] = useState<ImageFormat>("jpg")
-  const [dpi, setDpi] = useState<number>(DEFAULT_DPI)
+  const [resolution, setResolution] = useState<ImageResolution>(DEFAULT_IMAGE_RESOLUTION)
   const [pagesInput, setPagesInput] = useState("")
-  const [busy, setBusy] = useState(false)
-  const [stopping, setStopping] = useState(false)
   const [failed, setFailed] = useState(false)
-  const [progress, setProgress] = useState<PdfProgress | null>(null)
-  const stopRequested = useRef(false)
+  const { busy, progress, requestStop, run, stopping } = useExportDialogRun(
+    document.id,
+    "cancel_pdf_archive",
+  )
   const selection = parsePageRange(pagesInput, document.numPages)
   const selectionError =
     selection.kind === "invalid"
@@ -74,32 +105,29 @@ export function ImageExportDialog({
           })
         : undefined
 
-  const cancel = async () => {
-    if (await invoke<boolean>("cancel_pdf_archive", { documentId: document.id }).catch(() => false)) {
-      stopRequested.current = false
-    }
-  }
-
   const start = async () => {
-    setBusy(true)
-    setFailed(false)
-    setProgress(null)
-    stopRequested.current = false
-    const pages =
-      selection.kind === "pages"
-        ? selection.pages
-        : Array.from({ length: document.numPages }, (_, index) => index + 1)
-    const outcome = await onExport({
-      options: { format: "images", imageFormat, dpi, pages },
-      filterLabel: t("imageExport.filter"),
-      suggestedName: `${suggestedName.replace(/\.pdf$/i, "")}-${imageFormat}.zip`,
-    }, (next) => {
-      setProgress(next)
-      if (stopRequested.current) void cancel()
+    const result = await run((onProgress) => {
+      setFailed(false)
+      const pages =
+        selection.kind === "pages"
+          ? selection.pages
+          : Array.from({ length: document.numPages }, (_, index) => index + 1)
+      const dpi =
+        RESOLUTION_OPTIONS.find((option) => option.key === resolution)?.dpi ??
+        DEFAULT_IMAGE_DPI
+
+      return onExport(
+        {
+          options: { format: "images", imageFormat, dpi, pages },
+          filterLabel: t("imageExport.filter"),
+          suggestedName: `${suggestedName.replace(/\.pdf$/i, "")}-${imageFormat}.zip`,
+        },
+        onProgress,
+      )
     })
-    setBusy(false)
-    setStopping(false)
-    if (outcome === "failed") setFailed(true)
+
+    if (!result.ran || result.outcome === "busy") return
+    if (result.outcome === "failed") setFailed(true)
     else onClose()
   }
 
@@ -169,22 +197,22 @@ export function ImageExportDialog({
             </div>
           </div>
           <div className="grid content-start gap-2">
-            <span className="text-sm font-medium">{t("imageExport.dpi")}</span>
+            <span className="text-sm font-medium">{t("imageExport.resolution")}</span>
             <RadioGroup
-              aria-label={t("imageExport.dpi")}
+              aria-label={t("imageExport.resolution")}
               disabled={busy}
-              value={String(dpi)}
-              onValueChange={(value) => setDpi(Number(value))}
+              value={resolution}
+              onValueChange={(value) => setResolution(value as ImageResolution)}
               className="gap-4"
             >
-              {DPI_OPTIONS.map((option) => (
-                <Label key={option.dpi} className="items-start gap-3 has-data-disabled:cursor-not-allowed has-data-disabled:opacity-50">
+              {RESOLUTION_OPTIONS.map((option) => (
+                <Label key={option.key} className="items-start gap-3 has-data-disabled:cursor-not-allowed has-data-disabled:opacity-50">
                   <RadioGroupItem
-                    value={String(option.dpi)}
-                    data-testid={`image-dpi-${option.dpi}`}
+                    value={option.key}
+                    data-testid={`image-resolution-${option.key}`}
                   />
                   <span className="grid gap-1.5">
-                    <span>{option.dpi} dpi</span>
+                    <span>{t(option.labelKey)}</span>
                     <span className="text-xs font-normal leading-relaxed text-muted-foreground">
                       {t(option.hintKey)}
                     </span>
@@ -215,9 +243,7 @@ export function ImageExportDialog({
                 onClose()
                 return
               }
-              stopRequested.current = true
-              setStopping(true)
-              void cancel()
+              requestStop()
             }}
             data-testid="image-export-cancel"
           >

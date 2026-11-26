@@ -68,6 +68,57 @@ export function blankPdf() {
   return minimalPdf(1, "0 0 300 400")
 }
 
+/** One bookmark and one unique text line per page, for long outline and search jumps. */
+export function outlinedSearchPdf(pageCount: number) {
+  const fontId = 3 + pageCount * 2
+  const outlinesId = fontId + 1
+  const firstBookmarkId = outlinesId + 1
+  const lastBookmarkId = firstBookmarkId + pageCount - 1
+  const pages = Array.from({ length: pageCount }, (_, index) => {
+    const pageId = 3 + index
+    const contentId = 3 + pageCount + index
+
+    return (
+      `${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] ` +
+      `/Resources << /Font << /F1 ${fontId} 0 R >> >> ` +
+      `/Contents ${contentId} 0 R >>\nendobj\n`
+    )
+  })
+  const contents = Array.from({ length: pageCount }, (_, index) => {
+    const contentId = 3 + pageCount + index
+    const content =
+      `BT\n/F1 18 Tf\n40 260 Td\n(Chapter ${index + 1} marker) Tj\nET\n`
+
+    return (
+      `${contentId} 0 obj\n<< /Length ${content.length} >>\n` +
+      `stream\n${content}endstream\nendobj\n`
+    )
+  })
+  const bookmarks = Array.from({ length: pageCount }, (_, index) => {
+    const id = firstBookmarkId + index
+    const pageId = 3 + index
+    const prev = index > 0 ? ` /Prev ${id - 1} 0 R` : ""
+    const next = index + 1 < pageCount ? ` /Next ${id + 1} 0 R` : ""
+
+    return (
+      `${id} 0 obj\n<< /Title (Chapter ${index + 1}) /Parent ${outlinesId} 0 R` +
+      `${prev}${next} /Dest [${pageId} 0 R /XYZ null null null] >>\nendobj\n`
+    )
+  })
+
+  return buildPdf([
+    `1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Outlines ${outlinesId} 0 R >>\nendobj\n`,
+    `2 0 obj\n<< /Type /Pages /Kids [${pages
+      .map((_, index) => `${3 + index} 0 R`)
+      .join(" ")}] /Count ${pageCount} >>\nendobj\n`,
+    ...pages,
+    ...contents,
+    `${fontId} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n`,
+    `${outlinesId} 0 obj\n<< /Type /Outlines /First ${firstBookmarkId} 0 R /Last ${lastBookmarkId} 0 R /Count ${pageCount} >>\nendobj\n`,
+    ...bookmarks,
+  ])
+}
+
 /** Two pages, with one bookmark pointing at the second. */
 export function outlinedPdf() {
   return buildPdf([
@@ -582,20 +633,6 @@ export async function appMenuItem(action: string) {
   await item.waitForDisplayed({ timeout: 15_000 })
 
   return item
-}
-
-/** An entry of the menu's Export submenu, opened through its trigger. */
-export async function appExportMenuItem(action: string) {
-  await (await appMenuItem("export")).click()
-
-  const item = $(`[data-action='${action}']`)
-  await item.waitForDisplayed({ timeout: 15_000 })
-
-  return item
-}
-
-export async function clickAppExportMenuItem(action: string) {
-  await (await appExportMenuItem(action)).click()
 }
 
 /** The shown tab's sidebar: every tab mounts its own, the others hidden. */

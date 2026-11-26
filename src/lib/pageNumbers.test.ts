@@ -99,10 +99,12 @@ describe("parsePageNumbersDraft", () => {
     expect(parsePageNumbersDraft(draft({ start: "  " }), 10).config?.start).toBeNull()
   })
 
-  it("reads a custom start, bounded by the document", () => {
+  it("reads a custom start up to the maximum start ceiling", () => {
     expect(parsePageNumbersDraft(draft({ start: "10" }), 10).config?.start).toBe(10)
+    expect(parsePageNumbersDraft(draft({ start: "11" }), 10).config?.start).toBe(11)
+    expect(parsePageNumbersDraft(draft({ start: "99999" }), 1).config?.start).toBe(99999)
 
-    for (const start of ["0", "-1", "11", "100000", "abc", "1.5"]) {
+    for (const start of ["0", "-1", "100000", "abc", "1.5"]) {
       const { config: parsed, error } = parsePageNumbersDraft(draft({ start }), 10)
       expect(parsed).toBeNull()
       expect(error).toBe("start")
@@ -125,28 +127,29 @@ describe("pageNumbersFit", () => {
     expect(pageNumbersFit(config(), 1)).toBe(true)
     expect(pageNumbersFit(config({ range: [2, 5] }), 5)).toBe(true)
     expect(pageNumbersFit(config({ range: [2, 5] }), 4)).toBe(false)
-    expect(pageNumbersFit(config({ start: 3 }), 2)).toBe(false)
+    expect(pageNumbersFit(config({ start: 15 }), 2)).toBe(true)
+    expect(pageNumbersFit(config({ start: 100_000 }), 2)).toBe(false)
   })
 })
 
 describe("clampPageNumbersStart", () => {
-  it("snaps a start back into the document", () => {
-    expect(clampPageNumbersStart("11", 10)).toBe("10")
-    expect(clampPageNumbersStart("100000", 10)).toBe("10")
-    expect(clampPageNumbersStart("0", 10)).toBe("1")
-    expect(clampPageNumbersStart("-4", 10)).toBe("1")
-    expect(clampPageNumbersStart(" 1.5 ", 10)).toBe("2")
+  it("snaps a start back within the allowed start range", () => {
+    expect(clampPageNumbersStart("100000")).toBe("99999")
+    expect(clampPageNumbersStart("0")).toBe("1")
+    expect(clampPageNumbersStart("-4")).toBe("1")
+    expect(clampPageNumbersStart(" 1.5 ")).toBe("2")
   })
 
-  it("leaves a start the document reaches alone", () => {
-    expect(clampPageNumbersStart("1", 10)).toBe("1")
-    expect(clampPageNumbersStart("10", 10)).toBe("10")
+  it("leaves a valid start alone, including continuation starts past page count", () => {
+    expect(clampPageNumbersStart("1")).toBe("1")
+    expect(clampPageNumbersStart("11")).toBe("11")
+    expect(clampPageNumbersStart("99999")).toBe("99999")
   })
 
   it("keeps a blank field blank, and anything unreadable as it is", () => {
-    expect(clampPageNumbersStart("", 10)).toBe("")
-    expect(clampPageNumbersStart("   ", 10)).toBe("")
-    expect(clampPageNumbersStart("abc", 10)).toBe("abc")
+    expect(clampPageNumbersStart("")).toBe("")
+    expect(clampPageNumbersStart("   ")).toBe("")
+    expect(clampPageNumbersStart("abc")).toBe("abc")
   })
 })
 
@@ -270,6 +273,9 @@ describe("draftFirstPrinted", () => {
     expect(draftFirstPrinted(draft({ range: "4" }))).toBe(4)
     expect(draftFirstPrinted(draft({ range: "4-", start: "12" }))).toBe(12)
     expect(draftFirstPrinted(draft({ start: "not a number" }))).toBe(1)
+    expect(draftFirstPrinted(draft({ start: "0" }))).toBe(1)
+    expect(draftFirstPrinted(draft({ start: "999999999999999999999" }))).toBe(1)
+    expect(draftFirstPrinted(draft({ range: "0-5" }))).toBe(1)
   })
 })
 

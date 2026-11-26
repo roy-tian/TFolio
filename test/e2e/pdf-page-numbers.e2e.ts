@@ -4,18 +4,22 @@ import { $, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
 import {
+  activeSidebar,
   appMenuItem,
+  bandedPdf,
   blankPdf,
   closeAppMenu,
   dropZoneButton,
   minimalPdf,
   openPdfFromDisk,
   pagePixelFingerprint,
+  pointMultiPickerAt,
   renderedPage,
   refreshApp,
   seedSettings,
   tooltipOn,
   pressRedo,
+  writeScratchPdf,
 } from "./helpers"
 
 async function openPageNumbersDialog() {
@@ -40,6 +44,30 @@ async function extractedText() {
       .map((span) => span.textContent ?? "")
       .join(" "),
   )
+}
+
+async function pageExtractedText(pageNumber: number) {
+  return browser.execute((page: number) =>
+    Array.from(
+      document.querySelectorAll(
+        `[data-document-session][data-active='true'] [data-page-number='${page}'] .pdf-text-layer span`,
+      ),
+    )
+      .map((span) => span.textContent ?? "")
+      .join(" "),
+  pageNumber)
+}
+
+async function chooseBlankModeAndApply(choice: "show" | "hide" | "skip") {
+  await openPageNumbersDialog()
+  const select = $("[data-testid='page-numbers-blank-pages']")
+  await select.click()
+  await $(`[data-testid='page-numbers-blank-${choice}']`).click()
+  await $("[data-testid='page-numbers-apply']").click()
+  await $("[data-testid='page-numbers-dialog']").waitForDisplayed({
+    reverse: true,
+    timeout: 30_000,
+  })
 }
 
 describe("TFolio page numbers", () => {
@@ -108,23 +136,53 @@ describe("TFolio page numbers", () => {
     // With no stored style it opens on the mirrored choice.
     const preview = $("[data-testid='page-numbers-preview']")
     const automatic = $("//button[normalize-space()='Automatic']")
+    const fixedCenter = $("//button[normalize-space()='Fixed center']")
+    const fixedRight = $("//button[normalize-space()='Fixed right']")
+    // Layout height rather than getBoundingClientRect: the dialog's zoom-in-95
+    // open animation scales client rects for 100 ms after mount.
+    const measureHeights = () =>
+      browser.execute(() => ({
+        dialog: document.querySelector<HTMLElement>(
+          "[data-testid='page-numbers-dialog']",
+        )!.offsetHeight,
+        preview: document.querySelector<HTMLElement>(
+          "[data-testid='page-numbers-preview']",
+        )!.offsetHeight,
+      }))
+
     await expect(automatic).toHaveAttribute("aria-pressed", "true")
     await browser.waitUntil(
       async () => (await preview.getText()).includes("Even pages"),
       { timeout: 15_000, timeoutMsg: "the default never showed a mirrored pair" },
     )
+    const autoHeights = await measureHeights()
+    expect(autoHeights.dialog).toBeGreaterThan(0)
+    expect(autoHeights.preview).toBeGreaterThan(0)
 
-    await $("//button[normalize-space()='Fixed center']").click()
+    await fixedCenter.click()
     await browser.waitUntil(
       async () => (await preview.getText()).includes("Every page"),
       { timeout: 15_000, timeoutMsg: "the fixed place never went back to one sheet" },
     )
+    expect(await preview.getText()).not.toContain("Even pages")
+    const centerHeights = await measureHeights()
+    expect(centerHeights).toEqual(autoHeights)
+
+    await fixedRight.click()
+    await expect(fixedRight).toHaveAttribute("aria-pressed", "true")
+    const rightText = await preview.getText()
+    expect(rightText).toContain("Every page")
+    expect(rightText).not.toContain("Even pages")
+    const rightHeights = await measureHeights()
+    expect(rightHeights).toEqual(autoHeights)
 
     await automatic.click()
     await browser.waitUntil(
       async () => (await preview.getText()).includes("Even pages"),
       { timeout: 15_000, timeoutMsg: "the mirrored choice never showed a pair" },
     )
+    const restoredHeights = await measureHeights()
+    expect(restoredHeights).toEqual(autoHeights)
 
     // A backwards range holds the apply button until it is valid. The fixture
     // is one page, so a valid range is 1–1.
@@ -268,5 +326,71 @@ describe("TFolio page numbers", () => {
     await $(
       "//button[@role='tab'][normalize-space()='page-numbers-after-stop.pdf']",
     ).waitForExist({ timeout: 15_000 })
+  })
+
+  it("counts and displays smart-padding blanks by the blank-page rule and restores them on undo", async () => {
+    await seedSettings({
+      organize: { smartPadding: true },
+      ui: { language: "en", viewMode: "single" },
+    })
+    await refreshApp()
+    await dropZoneButton().waitForExist({ timeout: 30_000 })
+    await openPdfFromDisk("own.pdf", bandedPdf(1))
+    await renderedPage()
+
+    await pointMultiPickerAt([writeScratchPdf("added.pdf", bandedPdf(2))])
+    await $(`${activeSidebar} [data-slot='sidebar-add-files']`).click()
+    const viewerBlank = $(
+      "[data-document-session][data-active='true'] [data-pdf-viewer-layout] [data-padding-after='1']",
+    )
+    await viewerBlank.waitForExist({ timeout: 30_000 })
+
+    // Default: Automatic (duplex) + Count and show numbers.
+    // Sheet 1 = page 1 (`— 1 —`), Sheet 2 = padding blank (`— 2 —`, bottomLeft), Sheet 3 = page 2 (`— 3 —`).
+    await applyPageNumbers()
+    const blankNumber = viewerBlank.$("[data-testid='padding-page-number']")
+    await blankNumber.waitForExist({ timeout: 15_000 })
+    await expect(blankNumber).toHaveText("— 2 —")
+    await expect(blankNumber).toHaveAttribute("data-anchor", "bottomLeft")
+    await browser.waitUntil(
+      async () => {
+        const text = await pageExtractedText(2)
+        return text.includes("—") && text.includes("3")
+      },
+      { timeout: 20_000, timeoutMsg: "page 2 never counted past the padding blank" },
+    )
+
+    // Count but hide numbers: padding blank loses its label, page 2 still prints `— 3 —`.
+    await chooseBlankModeAndApply("hide")
+    await browser.waitUntil(async () => !(await blankNumber.isExisting()), {
+      timeout: 15_000,
+      timeoutMsg: "padding blank label should hide under count-and-hide",
+    })
+    const hiddenPageTwo = await pageExtractedText(2)
+    expect(hiddenPageTwo.includes("—") && hiddenPageTwo.includes("3")).toBe(true)
+
+    // Skip counting: padding blank stays bare and page 2 closes up to `— 2 —`.
+    await chooseBlankModeAndApply("skip")
+    await browser.waitUntil(
+      async () => {
+        const text = await pageExtractedText(2)
+        return text.includes("—") && text.includes("2") && !text.includes("3")
+      },
+      { timeout: 20_000, timeoutMsg: "page 2 never shifted to 2 when skipping blanks" },
+    )
+    expect(await blankNumber.isExisting()).toBe(false)
+
+    // Undoing twice returns to count-and-show with the padding blank label restored.
+    await $("button[aria-label^='Undo']").click()
+    await browser.waitUntil(
+      async () => {
+        const text = await pageExtractedText(2)
+        return text.includes("—") && text.includes("3")
+      },
+      { timeout: 20_000, timeoutMsg: "first undo never restored count-and-hide" },
+    )
+    await $("button[aria-label^='Undo']").click()
+    await blankNumber.waitForExist({ timeout: 20_000 })
+    await expect(blankNumber).toHaveText("— 2 —")
   })
 })

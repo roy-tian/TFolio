@@ -51,6 +51,9 @@ impl PdfiumEngine {
                     watermark: source.watermark.clone(),
                     page_numbers: source.page_numbers.clone(),
                     per_page: HashMap::from([(page_id, tail.unwrap().clone())]),
+                    page_number_stamps: HashMap::new(),
+                    padding_numbers: HashMap::new(),
+                    page_numbers_version: source.page_numbers_version,
                 };
                 // Check the imported objects too, rather than assuming the
                 // importer preserved their order and hiding unrelated content.

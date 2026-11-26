@@ -14,11 +14,8 @@ const LUMINANCE_THRESHOLD: f32 = 0.5;
 /// not "is this dark".
 const BLANK_INK_LUMINANCE: f32 = 0.9;
 /// The share of sampled pixels that may still be ink on a page called blank, so
-/// a speck of scanner noise does not make a sheet count as a printed page.
-const BLANK_INK_TOLERANCE: f32 = 0.001;
-/// The band our own page number sits in: without it a second apply would read
-/// its first label as content.
-const BLANK_SCAN_SKIRT: f32 = BOTTOM_MARGIN + FONT_SIZE * 1.5;
+/// a stray speck does not count as content while short text on A4 still does.
+const BLANK_INK_TOLERANCE: f32 = 0.0001;
 
 const WHITE_INK: &str = "#FFFFFF";
 const BLACK_INK: &str = "#000000";
@@ -67,11 +64,22 @@ pub enum PageNumbersPosition {
 
 // Every anchor is along the bottom edge, so the shared prefix is the point.
 #[allow(clippy::enum_variant_names)]
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) enum PageNumberAnchor {
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PageNumberAnchor {
     BottomCenter,
     BottomRight,
     BottomLeft,
+}
+
+/// The label a padding blank between files carries when page numbers include
+/// and show numbers on blank pages: shown in the viewer, printed, and stamped
+/// when a Save As or A4 copy inserts the sheet.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaddingPageNumber {
+    pub text: String,
+    pub anchor: PageNumberAnchor,
 }
 
 /// Unrotated page space, the same space `WatermarkPlacement` uses, so one
@@ -124,7 +132,16 @@ impl PageNumbersConfig {
         }
     }
 
-    fn range_from(&self) -> i32 {
+    /// A padding blank after 1-based `after` lies between `after` and
+    /// `after + 1`, so it falls inside the range only when both sides do.
+    pub(super) fn covers_padding_after(&self, after: i32) -> bool {
+        match self.range {
+            Some((from, to)) => after >= from && after < to,
+            None => true,
+        }
+    }
+
+    pub(super) fn range_from(&self) -> i32 {
         self.range.map_or(1, |(from, _)| from)
     }
 
@@ -163,11 +180,16 @@ pub(super) struct PageNumbering<'a> {
 }
 
 impl<'a> PageNumbering<'a> {
-    pub(super) fn new(config: &'a PageNumbersConfig) -> Self {
+    pub(super) fn new_from(config: &'a PageNumbersConfig, first_sheet: i32) -> Self {
         Self {
-            next: config.start.unwrap_or_else(|| config.range_from()),
+            next: config.start.unwrap_or(first_sheet),
             config,
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn new(config: &'a PageNumbersConfig) -> Self {
+        Self::new_from(config, config.range_from())
     }
 
     pub(super) fn advance(&mut self, page_number: i32, blank: bool) -> Option<String> {
@@ -180,17 +202,20 @@ impl<'a> PageNumbering<'a> {
 
         (!blank || self.config.blank_numbered).then(|| label(printed))
     }
-}
 
-pub(super) fn blank_scan_box(display_width: f32, display_height: f32) -> Option<DisplayBox> {
-    let height = display_height - BLANK_SCAN_SKIRT;
+    /// Advances over a virtual padding blank after 1-based `after_page_number`.
+    /// Counted and optionally printed under the same blank-page rules as a
+    /// real blank page inside the range.
+    pub(super) fn advance_padding(&mut self, after_page_number: i32) -> Option<String> {
+        if !self.config.covers_padding_after(after_page_number) || !self.config.blank_counted {
+            return None;
+        }
 
-    (height > 0.0 && display_width > 0.0).then_some(DisplayBox {
-        left: 0.0,
-        top: 0.0,
-        width: display_width,
-        height,
-    })
+        let printed = self.next;
+        self.next += 1;
+
+        self.config.blank_numbered.then(|| label(printed))
+    }
 }
 
 /// Pixels are composited over white first, so a page whose only "content" is
@@ -228,23 +253,31 @@ fn display_size(rotation: f32, unrotated_width: f32, unrotated_height: f32) -> (
 
 fn display_center(
     display_width: f32,
+    display_height: f32,
     text_width: f32,
     text_height: f32,
     anchor: PageNumberAnchor,
 ) -> (f32, f32) {
-    let center_y = BOTTOM_MARGIN + text_height / 2.0;
+    // Clamp margins on unusually narrow or short pages so side anchors never
+    // cross each other or clip outside the visible sheet.
+    let bottom_margin = BOTTOM_MARGIN.min(((display_height - text_height) / 2.0).max(0.0));
+    let side_margin = SIDE_MARGIN.min(((display_width - text_width) / 2.0).max(0.0));
+    let center_y = bottom_margin + text_height / 2.0;
     let center_x = match anchor {
         PageNumberAnchor::BottomCenter => display_width / 2.0,
-        PageNumberAnchor::BottomRight => display_width - SIDE_MARGIN - text_width / 2.0,
-        PageNumberAnchor::BottomLeft => SIDE_MARGIN + text_width / 2.0,
+        PageNumberAnchor::BottomRight => display_width - side_margin - text_width / 2.0,
+        PageNumberAnchor::BottomLeft => side_margin + text_width / 2.0,
     };
 
     (center_x, center_y)
 }
 
-/// The inverse of the `/Rotate` a render applies, so the number lands upright
-/// at the display position on a page turned any of the four ways.
-pub(super) fn page_number_center(
+/// The inverse of the `/Rotate` a render applies, offset by the visible page
+/// box's unrotated origin, so the number lands upright inside cropped pages too.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn page_number_center_in_box(
+    origin_x: f32,
+    origin_y: f32,
     unrotated_width: f32,
     unrotated_height: f32,
     rotation: f32,
@@ -252,9 +285,15 @@ pub(super) fn page_number_center(
     bounds_height: f32,
     anchor: PageNumberAnchor,
 ) -> PageNumberPlacement {
-    let (display_width, _) = display_size(rotation, unrotated_width, unrotated_height);
+    let (display_width, display_height) = display_size(rotation, unrotated_width, unrotated_height);
     let (text_width, text_height) = upright_text_size(rotation, bounds_width, bounds_height);
-    let (center_x, center_y) = display_center(display_width, text_width, text_height, anchor);
+    let (center_x, center_y) = display_center(
+        display_width,
+        display_height,
+        text_width,
+        text_height,
+        anchor,
+    );
 
     let (unrotated_x, unrotated_y) = match rotation as i32 {
         90 => (unrotated_width - center_y, center_x),
@@ -264,9 +303,30 @@ pub(super) fn page_number_center(
     };
 
     PageNumberPlacement {
-        center_x: unrotated_x,
-        center_y: unrotated_y,
+        center_x: origin_x + unrotated_x,
+        center_y: origin_y + unrotated_y,
     }
+}
+
+#[cfg(test)]
+pub(super) fn page_number_center(
+    unrotated_width: f32,
+    unrotated_height: f32,
+    rotation: f32,
+    bounds_width: f32,
+    bounds_height: f32,
+    anchor: PageNumberAnchor,
+) -> PageNumberPlacement {
+    page_number_center_in_box(
+        0.0,
+        0.0,
+        unrotated_width,
+        unrotated_height,
+        rotation,
+        bounds_width,
+        bounds_height,
+        anchor,
+    )
 }
 
 pub(super) fn page_number_display_box(
@@ -279,7 +339,13 @@ pub(super) fn page_number_display_box(
 ) -> DisplayBox {
     let (display_width, display_height) = display_size(rotation, unrotated_width, unrotated_height);
     let (text_width, text_height) = upright_text_size(rotation, bounds_width, bounds_height);
-    let (center_x, center_y) = display_center(display_width, text_width, text_height, anchor);
+    let (center_x, center_y) = display_center(
+        display_width,
+        display_height,
+        text_width,
+        text_height,
+        anchor,
+    );
 
     DisplayBox {
         left: center_x - text_width / 2.0,
@@ -296,14 +362,15 @@ pub(super) fn relative_luminance(red: u8, green: u8, blue: u8) -> f32 {
     (0.2126 * red as f32 + 0.7152 * green as f32 + 0.0722 * blue as f32) / 255.0
 }
 
-/// The mean relative luminance of a run of RGBA pixels. An empty run reads as
-/// light, so an unsampled number stays black.
+/// The mean relative luminance of a run of RGBA pixels, composited over white.
+/// An empty run reads as light, so an unsampled number stays black.
 pub(super) fn average_luminance(rgba: &[u8]) -> f32 {
     let mut sum = 0.0f32;
     let mut count = 0u32;
 
     for pixel in rgba.as_chunks::<4>().0 {
-        sum += relative_luminance(pixel[0], pixel[1], pixel[2]);
+        let alpha = pixel[3] as f32 / 255.0;
+        sum += (1.0 - alpha) + alpha * relative_luminance(pixel[0], pixel[1], pixel[2]);
         count += 1;
     }
 
@@ -463,36 +530,52 @@ mod tests {
     }
 
     #[test]
-    fn the_blank_test_reads_the_page_above_its_own_number_band() {
-        let scanned = blank_scan_box(600.0, 800.0).expect("an A4-ish page has content space");
-        assert_eq!(scanned.left, 0.0);
-        assert_eq!(scanned.top, 0.0);
-        assert_eq!(scanned.width, 600.0);
-        assert!((scanned.height - (800.0 - BLANK_SCAN_SKIRT)).abs() < 1e-3);
+    fn padding_blanks_follow_the_blank_page_rules_and_range() {
+        let mut show = config();
+        let mut numbering = PageNumbering::new_from(&show, 1);
+        assert_eq!(numbering.advance(1, false), Some("— 1 —".to_string()));
+        assert_eq!(numbering.advance_padding(1), Some("— 2 —".to_string()));
+        assert_eq!(numbering.advance(2, false), Some("— 3 —".to_string()));
 
-        // A page shorter than the band it would print its own number in has
-        // nowhere for content to be.
-        assert!(blank_scan_box(600.0, BLANK_SCAN_SKIRT).is_none());
-        assert!(blank_scan_box(0.0, 800.0).is_none());
+        let mut hide = config();
+        hide.blank_numbered = false;
+        let mut numbering = PageNumbering::new_from(&hide, 1);
+        assert_eq!(numbering.advance(1, false), Some("— 1 —".to_string()));
+        assert_eq!(numbering.advance_padding(1), None);
+        assert_eq!(numbering.advance(2, false), Some("— 3 —".to_string()));
+
+        let mut skip = config();
+        skip.blank_numbered = false;
+        skip.blank_counted = false;
+        let mut numbering = PageNumbering::new_from(&skip, 1);
+        assert_eq!(numbering.advance(1, false), Some("— 1 —".to_string()));
+        assert_eq!(numbering.advance_padding(1), None);
+        assert_eq!(numbering.advance(2, false), Some("— 2 —".to_string()));
+
+        // A padding blank outside the range is neither counted nor printed.
+        show.range = Some((2, 3));
+        assert!(!show.covers_padding_after(1));
+        assert!(show.covers_padding_after(2));
+        assert!(!show.covers_padding_after(3));
     }
 
     #[test]
     fn a_page_is_blank_until_something_prints_on_it() {
-        let white = [255u8, 255, 255, 255].repeat(1000);
+        let white = [255u8, 255, 255, 255].repeat(10_000);
         assert!(is_blank_sample(&white));
         // Nothing sampled at all is blank rather than a failure.
         assert!(is_blank_sample(&[]));
 
         // Transparent pixels are composited over white before they are read.
-        assert!(is_blank_sample(&[0, 0, 0, 0].repeat(1000)));
+        assert!(is_blank_sample(&[0, 0, 0, 0].repeat(10_000)));
 
-        // A tolerance of stray dark pixels, but text is far past it.
+        // A tolerance of stray dark pixels, while short text still clears it.
         let mut speck = white.clone();
         speck[0..4].copy_from_slice(&[0, 0, 0, 255]);
         assert!(is_blank_sample(&speck));
 
         let mut printed = white.clone();
-        for pixel in printed.as_chunks_mut::<4>().0.iter_mut().take(100) {
+        for pixel in printed.as_chunks_mut::<4>().0.iter_mut().take(10) {
             pixel.copy_from_slice(&[0, 0, 0, 255]);
         }
         assert!(!is_blank_sample(&printed));
@@ -616,14 +699,45 @@ mod tests {
     }
 
     #[test]
+    fn clamps_margins_inside_narrow_and_short_pages() {
+        let right = page_number_center(100.0, 50.0, 0.0, 40.0, 11.0, PageNumberAnchor::BottomRight);
+        let left = page_number_center(100.0, 50.0, 0.0, 40.0, 11.0, PageNumberAnchor::BottomLeft);
+
+        assert!(right.center_x >= 20.0 && right.center_x <= 80.0);
+        assert!(left.center_x >= 20.0 && left.center_x <= 80.0);
+        assert!(left.center_x <= right.center_x);
+        assert!(right.center_y >= 5.5 && right.center_y <= 44.5);
+    }
+
+    #[test]
+    fn offsets_placement_by_a_cropped_page_origin() {
+        let placement = page_number_center_in_box(
+            100.0,
+            80.0,
+            600.0,
+            800.0,
+            0.0,
+            40.0,
+            11.0,
+            PageNumberAnchor::BottomCenter,
+        );
+
+        assert!((placement.center_x - 400.0).abs() < 1e-3);
+        assert!((placement.center_y - (80.0 + BOTTOM_MARGIN + 5.5)).abs() < 1e-3);
+    }
+
+    #[test]
     fn dark_drops_get_white_ink_and_light_drops_get_black() {
         let black = average_luminance(&[0, 0, 0, 255, 0, 0, 0, 255]);
         let white = average_luminance(&[255, 255, 255, 255, 255, 255, 255, 255]);
+        let transparent = average_luminance(&[0, 0, 0, 0, 0, 0, 0, 0]);
 
         assert!(black < LUMINANCE_THRESHOLD);
         assert!(white >= LUMINANCE_THRESHOLD);
+        assert!(transparent >= LUMINANCE_THRESHOLD);
         assert_eq!(ink_color(black), WHITE_INK);
         assert_eq!(ink_color(white), BLACK_INK);
+        assert_eq!(ink_color(transparent), BLACK_INK);
         // An empty sample reads as light, so a number stays black.
         assert_eq!(ink_color(average_luminance(&[])), BLACK_INK);
     }
