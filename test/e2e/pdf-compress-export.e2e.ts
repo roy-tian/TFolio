@@ -11,6 +11,7 @@ import {
   renderedPage,
   seedSettings,
 } from "./helpers"
+import { calibratePointer, pointer } from "./nativePointer"
 
 type CompressRequest = {
   imageQuality: number
@@ -70,10 +71,24 @@ describe("TFolio compress and save", () => {
     // line settles only once the answer for the chosen quality has landed.
     await settleEstimate()
     await expect($("[data-testid='compress-quality-value']")).toHaveText("60%")
-    const thumb = await $("[data-testid='compress-quality'] [data-slot='slider-thumb']")
-    await thumb.click()
-    await browser.keys("ArrowLeft")
-    await expect($("[data-testid='compress-quality-value']")).toHaveText("55%")
+
+    // Base UI's slider binds pointerdown rather than click, so a synthetic
+    // WebDriver click never focuses or moves the thumb; clicking the track
+    // midpoint lands on 50% regardless of inset thumb alignment.
+    const offset = await calibratePointer()
+    const trackMid = await browser.execute(() => {
+      const rect = document
+        .querySelector("[data-testid='compress-quality'] [data-slot='slider-track']")!
+        .getBoundingClientRect()
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+    })
+    pointer({ x: trackMid.x + offset.x, y: trackMid.y + offset.y })
+    pointer({ down: true })
+    try {
+      await expect($("[data-testid='compress-quality-value']")).toHaveText("50%")
+    } finally {
+      pointer({ down: false })
+    }
     await settleEstimate()
 
     await $("[data-testid='compress-start']").click()
@@ -82,7 +97,7 @@ describe("TFolio compress and save", () => {
     const request = await browser.execute(
       () => (window as CompressSeam).__compressRequest,
     )
-    expect(request?.imageQuality).toBe(55)
+    expect(request?.imageQuality).toBe(50)
     expect(request?.suggestedName).toBe("compress-compressed.pdf")
     expect(request?.documentId).toBeGreaterThan(0)
   })
