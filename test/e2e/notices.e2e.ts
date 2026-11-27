@@ -68,37 +68,64 @@ describe("TFolio notices", () => {
     await expect($("[data-page-notice]")).toHaveText("Page 2 cut")
   })
 
-  it("steps the corner below the find bar while it is open", async () => {
+  it("anchors the corner above the status bar and clear of the find bar", async () => {
     await openPdfFromDisk("find.pdf", bandedPdf(2))
     await $(`${activeSidebar} button[data-thumbnail-page='1']`).waitForDisplayed()
 
-    const cornerTop = () =>
-      browser.execute(
-        () =>
-          getComputedStyle(
-            document.querySelector("[data-slot='notice-center']")!,
-          ).top,
-      )
+    await cutPage(2)
+    await $("[data-page-notice]").waitForDisplayed()
 
-    const closed = await cornerTop()
+    const measureCorner = () =>
+      browser.execute(() => {
+        const corner = document
+          .querySelector("[data-slot='notice-center']")!
+          .getBoundingClientRect()
+        const statusBar = document
+          .querySelector("[data-slot='status-bar']")!
+          .getBoundingClientRect()
+
+        return {
+          corner: {
+            bottom: corner.bottom,
+            right: corner.right,
+            top: corner.top,
+          },
+          statusBarTop: statusBar.top,
+          viewportWidth: window.innerWidth,
+        }
+      })
+
+    const initial = await measureCorner()
+    expect(initial.corner.bottom).toBeLessThan(initial.statusBarTop)
+    expect(initial.corner.right).toBeLessThanOrEqual(initial.viewportWidth)
+    expect(initial.viewportWidth - initial.corner.right).toBeLessThanOrEqual(24)
 
     await $("[data-slot='pdf-search-trigger']").click()
     await $("[data-slot='pdf-search']").waitForDisplayed()
-    const barBottom = await browser.execute(
-      () =>
-        document
-          .querySelector("[data-slot='pdf-search']")!
-          .getBoundingClientRect().bottom,
-    )
 
-    // The corner's own anchor lies within the bar's band, so the stack has to
-    // step down or it lands across the field being typed in.
-    await browser.waitUntil(
-      async () => Number.parseFloat(await cornerTop()) > barBottom,
-      { timeout: 5_000, timeoutMsg: "the corner never stepped below the find bar" },
-    )
+    const after = await browser.execute(() => {
+      const corner = document
+        .querySelector("[data-slot='notice-center']")!
+        .getBoundingClientRect()
+      const findBar = document
+        .querySelector("[data-slot='pdf-search']")!
+        .getBoundingClientRect()
 
-    expect(Number.parseFloat(closed)).toBeLessThan(barBottom)
+      return {
+        cornerBottom: corner.bottom,
+        cornerLeft: corner.left,
+        cornerRight: corner.right,
+        cornerTop: corner.top,
+        findBarBottom: findBar.bottom,
+        findBarLeft: findBar.left,
+        findBarRight: findBar.right,
+      }
+    })
+
+    expect(after.cornerTop).toBeGreaterThan(after.findBarBottom)
+    expect(Math.abs(after.cornerBottom - initial.corner.bottom)).toBeLessThan(1)
+    expect(Math.abs(after.cornerLeft - after.findBarLeft)).toBeLessThan(1)
+    expect(Math.abs(after.cornerRight - after.findBarRight)).toBeLessThan(1)
   })
 
   it("keeps the corner above a modal and out of its aria-hidden sweep", async () => {

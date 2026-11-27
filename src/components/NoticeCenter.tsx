@@ -26,13 +26,17 @@ import {
 } from "@/lib/notices"
 import { cn } from "@/lib/utils"
 
-/** Every tone but the plain one colours the words as well as the border: a
-    border alone is too quiet to tell good news from a bare report. */
+/** Every tone has an opaque tinted surface paired with its border and text so
+    underlying PDF content never bleeds through. */
 const toneClasses: Record<NoticeTone, string> = {
-  danger: "border-destructive/40 text-destructive",
-  info: "border-border",
-  success: "border-success/40 text-success",
-  warning: "border-warning/40 text-warning",
+  danger:
+    "border-red-300/80 bg-red-50 text-red-800 dark:border-red-800/80 dark:bg-red-950 dark:text-red-200",
+  info:
+    "border-zinc-300/80 bg-zinc-100 text-zinc-900 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100",
+  success:
+    "border-green-300/80 bg-green-50 text-green-800 dark:border-green-800/80 dark:bg-green-950 dark:text-green-200",
+  warning:
+    "border-amber-300/80 bg-amber-50 text-amber-800 dark:border-amber-800/80 dark:bg-amber-950 dark:text-amber-200",
 }
 
 /** Tone is carried twice — mark and colour — because colour alone is no signal
@@ -92,8 +96,9 @@ export function NoticeCenter({
     // found by attribute, not by the role each row carries — rows announce.
     <div
       aria-live="off"
-      // The anchor moves in `index.css` while the find bar shares this band.
-      className="pointer-events-none fixed top-[calc(var(--toolbar-height)+var(--document-tabs-height)+1rem)] right-4 z-70 flex w-96 max-w-[calc(100%-2rem)] flex-col gap-2 transition-[top] duration-150"
+      // Anchored above the status bar; `flex-col-reverse` pins standing rows at
+      // the bottom so new transient rows stacking upward never shift buttons.
+      className="pointer-events-none fixed right-4 bottom-[calc(var(--status-bar-height)+1rem)] z-70 flex w-96 max-w-[calc(100%-2rem)] flex-col-reverse gap-2"
       data-slot="notice-center"
     >
       {shown.map((notice) => (
@@ -145,7 +150,7 @@ function NoticeRow({ notice, onAction, onDismiss, onExpire }: NoticeRowProps) {
   const MarkIcon = running ? Spinner : toneIcons[entry.tone]
   const actionButton = action ? (
     <Button
-      className="shrink-0"
+      className="shrink-0 border-current/25 bg-background/80 not-disabled:hover:bg-background not-disabled:hover:text-current dark:border-current/25 dark:bg-background/40 dark:not-disabled:hover:bg-background/60 dark:not-disabled:hover:text-current"
       disabled={busy}
       onClick={() => onAction(notice)}
       size="sm"
@@ -158,7 +163,7 @@ function NoticeRow({ notice, onAction, onDismiss, onExpire }: NoticeRowProps) {
   return (
     <div
       className={cn(
-        "pointer-events-auto flex items-center gap-2 rounded-lg border bg-background px-4 py-2 text-sm shadow-lg",
+        "pointer-events-auto flex items-center gap-2 rounded-lg border px-4 py-2 text-sm shadow-lg",
         toneClasses[entry.tone],
       )}
       data-notice={notice.kind}
@@ -196,7 +201,7 @@ function NoticeRow({ notice, onAction, onDismiss, onExpire }: NoticeRowProps) {
         <>
           <OperationProgress
             barFirst={"barFirst" in entry}
-            className="min-w-0 flex-1"
+            className="min-w-0 flex-1 [&_[data-slot=progress-track]]:bg-current/15 [&_[data-slot=progress-indicator]]:bg-current [&_[data-slot=progress-value]]:text-current/75 [&_svg]:text-current/75"
             label={message}
             progress={notice.progress}
           />
