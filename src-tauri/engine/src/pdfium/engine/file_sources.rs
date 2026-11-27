@@ -528,7 +528,7 @@ impl PdfiumEngine {
             let before = ImportRollback::of(entry)?;
 
             if entry.sections.is_none() {
-                let outline = collect_bookmark_siblings(entry.document.bookmarks().root());
+                let outline = entry.effective_own_outline();
 
                 entry.sections = Some(sections::SectionBook::begin(
                     own_title,

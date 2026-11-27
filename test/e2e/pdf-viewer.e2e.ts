@@ -15,6 +15,7 @@ import {
   seedSettings,
   textPdf,
 } from "./helpers"
+import { calibratePointer, pointer } from "./nativePointer"
 
 // The zoom listener is bound natively and non-passively, so the wheel goes out
 // as a real event; hidden tabs carry a 0x0 `<main>` too, so scope to the active one.
@@ -378,6 +379,85 @@ describe("TFolio PDF viewer", () => {
     await $(`${activeSidebar} button[aria-label='Outline']`).click()
     await expect(bookmarks.$("button=Part two")).toBeDisplayed()
     await expect(chapter()).not.toBeExisting()
+  })
+
+  it("renames and deletes bookmarks on hover, and persists or undoes them", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+    await openPdfFromDisk("nested-edit.pdf", nestedOutlinePdf())
+    await $("[data-page-number='1']").waitForDisplayed()
+
+    const bookmarks = $(`${activeSidebar} nav[aria-label='Bookmarks']`)
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
+    await bookmarks.$("button=Part one").waitForDisplayed()
+
+    const rowTools = `${activeSidebar} nav[aria-label='Bookmarks'] [data-slot='bookmark-tools']`
+    const toolsOpacity = (index: number) =>
+      browser.execute(
+        (css: string, at: number) => {
+          const el = document.querySelectorAll<HTMLElement>(css)[at]
+          return el ? getComputedStyle(el).opacity : null
+        },
+        rowTools,
+        index,
+      )
+
+    // Hidden at rest.
+    expect(await toolsOpacity(0)).toBe("0")
+
+    // Visible on real pointer hover, and hidden again once the pointer leaves.
+    const origin = await calibratePointer()
+    const rowCenter = await browser.execute((css: string) => {
+      const box = document.querySelector<HTMLElement>(css)!.getBoundingClientRect()
+      return { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) }
+    }, `${activeSidebar} nav[aria-label='Bookmarks'] [data-slot='bookmark-row']`)
+    try {
+      pointer({ x: origin.x + rowCenter.x, y: origin.y + rowCenter.y })
+      await browser.waitUntil(async () => (await toolsOpacity(0)) === "1", {
+        timeoutMsg: "hovering bookmark row never revealed row tools",
+      })
+    } finally {
+      pointer({ x: origin.x + 10, y: origin.y + 10 })
+    }
+    await browser.waitUntil(async () => (await toolsOpacity(0)) === "0", {
+      timeoutMsg: "leaving bookmark row never hid row tools",
+    })
+
+    // Visible on keyboard focus-visible of the tool button as well.
+    await browser.execute((css: string) => {
+      document.querySelectorAll<HTMLElement>(css)[0]!.focus()
+    }, `${activeSidebar} nav[aria-label='Bookmarks'] [data-slot='bookmark-rename']`)
+    await browser.keys(["Shift", "Tab"])
+    await browser.keys("Tab")
+    await browser.waitUntil(async () => (await toolsOpacity(0)) === "1", {
+      timeoutMsg: "focus-visible on bookmark rename button never revealed row tools",
+    })
+
+    // Rename "Part one" via the pencil button.
+    await browser.execute((css: string) => {
+      const btn = document.querySelectorAll<HTMLElement>(css)[0]!
+      btn.click()
+    }, `${activeSidebar} nav[aria-label='Bookmarks'] [data-slot='bookmark-rename']`)
+    const input = $(`${activeSidebar} [data-slot='bookmark-title-input']`)
+    await input.waitForDisplayed()
+    await expect(input).toBeFocused()
+    await input.setValue("Section one")
+    await browser.keys("Enter")
+    await bookmarks.$("button=Section one").waitForDisplayed()
+
+    // Delete "Part two" via the delete button, then undo and redo.
+    await browser.execute((css: string) => {
+      const btns = document.querySelectorAll<HTMLElement>(css)
+      btns[btns.length - 1]!.click()
+    }, `${activeSidebar} nav[aria-label='Bookmarks'] [data-slot='bookmark-delete']`)
+    await expect(bookmarks.$("button=Part two")).not.toBeExisting()
+
+    await browser.keys(["Control", "z"])
+    await bookmarks.$("button=Part two").waitForDisplayed()
+
+    // Undo the rename too, then verify clean state.
+    await browser.keys(["Control", "z"])
+    await bookmarks.$("button=Part one").waitForDisplayed()
   })
 
   it("turns whole pages and spreads with Page Up and Page Down at any zoom", async () => {

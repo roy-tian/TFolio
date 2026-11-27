@@ -38,6 +38,7 @@ export type DocumentState = {
   pageNumbers: Stamped<PageNumbersConfig> | null
   fileOptions: Changed<FileOptions> | null
   titles: Record<string, Changed<string>>
+  bookmarkTitles: Record<string, Changed<string>>
 }
 
 type MovingCommand = Extract<
@@ -181,6 +182,18 @@ function apply(
       state.titles[key] = { from: state.titles[key]?.from ?? command.previous, to: command.title }
       return
     }
+    case "renameBookmark": {
+      const key = `${command.sectionId ?? "doc"}:${command.path.join(".")}`
+
+      state.bookmarkTitles[key] = {
+        from: state.bookmarkTitles[key]?.from ?? command.previous,
+        to: command.title,
+      }
+      return
+    }
+    case "deleteBookmark":
+      state.opaque = true
+      return
     case "rotatePages":
       turn(state, command.pages, command.degrees)
       return
@@ -218,6 +231,7 @@ function apply(
 /** The state `past` leaves the document in, from the state it opened in. */
 export function documentState(past: AnnotationEntry[]): DocumentState {
   const state: DocumentState = {
+    bookmarkTitles: {},
     fileOptions: null,
     marks: [],
     opaque: false,
@@ -304,11 +318,16 @@ export function sameDocumentState(left: DocumentState, right: DocumentState): bo
   }
 
   const sameTitle = (from: string, to: string) => from === to
+  const sameTitles = (
+    leftMap: Record<string, Changed<string>>,
+    rightMap: Record<string, Changed<string>>,
+  ) =>
+    [...new Set([...Object.keys(leftMap), ...Object.keys(rightMap)])].every(
+      (key) => changedTo(leftMap[key], sameTitle)?.to === changedTo(rightMap[key], sameTitle)?.to,
+    )
 
-  return [...new Set([...Object.keys(left.titles), ...Object.keys(right.titles)])].every(
-    (section) =>
-      changedTo(left.titles[section], sameTitle)?.to ===
-      changedTo(right.titles[section], sameTitle)?.to,
+  return (
+    sameTitles(left.titles, right.titles) && sameTitles(left.bookmarkTitles, right.bookmarkTitles)
   )
 }
 

@@ -26,7 +26,7 @@ impl OpenDocument {
     /// it writes a bookmark per file.
     pub(super) fn split_outline(&self) -> Vec<PdfOutlineItem> {
         self.files_split_outline()
-            .unwrap_or_else(|| collect_bookmark_siblings(self.document.bookmarks().root()))
+            .unwrap_or_else(|| self.effective_own_outline())
     }
 
     /// `split_outline` while files added to the document still show; `None`

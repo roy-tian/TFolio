@@ -280,6 +280,8 @@ const de = {
     actionInsertFiles_one: "Datei hinzufügen",
     actionInsertFiles_other: "{{count}} Dateien hinzufügen",
     actionRenameFile: "Datei umbenennen",
+    actionRenameBookmark: "Lesezeichen umbenennen",
+    actionDeleteBookmark: "Lesezeichen löschen",
     actionSmartPadding: "Dateien auf ungeraden Seiten beginnen",
     actionFileBookmarks: "Lesezeichen pro Datei anlegen",
     saveForeign: "Seiten aus anderen Dateien wurden hinzugefügt – nur als neue Datei speicherbar",
@@ -559,6 +561,9 @@ const de = {
   bookmarks: {
     title: "Lesezeichen",
     untitled: "Unbenanntes Lesezeichen",
+    name: "Lesezeichenname",
+    rename: "{{name}} umbenennen",
+    delete: "{{name}} löschen",
   },
   sidebar: {
     show: "Seitenleiste einblenden",

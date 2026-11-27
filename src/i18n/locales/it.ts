@@ -278,6 +278,8 @@ const it = {
     actionInsertFiles_one: "aggiunta file",
     actionInsertFiles_other: "aggiunta di {{count}} file",
     actionRenameFile: "ridenominazione file",
+    actionRenameBookmark: "ridenominazione segnalibro",
+    actionDeleteBookmark: "eliminazione segnalibro",
     actionSmartPadding: "inizio dei file su pagine dispari",
     actionFileBookmarks: "segnalibro per ogni file",
     saveForeign: "Sono state aggiunte pagine di altri file: si può salvare solo come nuovo file",
@@ -557,6 +559,9 @@ const it = {
   bookmarks: {
     title: "Segnalibri",
     untitled: "Segnalibro senza titolo",
+    name: "Nome del segnalibro",
+    rename: "Rinomina {{name}}",
+    delete: "Elimina {{name}}",
   },
   sidebar: {
     show: "Mostra barra laterale",

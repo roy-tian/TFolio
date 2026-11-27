@@ -277,6 +277,8 @@ const en = {
     actionInsertFiles_one: "adding a file",
     actionInsertFiles_other: "adding {{count}} files",
     actionRenameFile: "renaming a file",
+    actionRenameBookmark: "renaming a bookmark",
+    actionDeleteBookmark: "deleting a bookmark",
     actionSmartPadding: "starting files on odd pages",
     actionFileBookmarks: "saving a bookmark per file",
     saveForeign: "Pages from other files were added, so this saves only as a new file",
@@ -556,6 +558,9 @@ const en = {
   bookmarks: {
     title: "Bookmarks",
     untitled: "Untitled bookmark",
+    name: "Bookmark name",
+    rename: "Rename {{name}}",
+    delete: "Delete {{name}}",
   },
   sidebar: {
     show: "Show sidebar",

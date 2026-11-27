@@ -1317,4 +1317,31 @@ describe("TFolio blank pages between files", () => {
     await waitForPages(4)
     expect(await blanksIn(activeSidebar)).toEqual([])
   })
+
+  it("renames and deletes a section bookmark in the multi-file outline", async () => {
+    await openPdfFromDisk("own.pdf", minimalPdf(1))
+    await addFilesFromPicker([writeScratchPdf("outlined.pdf", outlinedPdf())])
+    await waitForPages(3)
+
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
+    const files = $(`${activeSidebar} [data-slot='file-sections']`)
+    await files.$("button=Second half").waitForDisplayed()
+
+    await browser.execute((css: string) => {
+      document.querySelector<HTMLElement>(css)!.click()
+    }, `${activeSidebar} [data-slot='file-sections'] [data-slot='bookmark-rename']`)
+    const input = $(`${activeSidebar} [data-slot='bookmark-title-input']`)
+    await input.waitForDisplayed()
+    await input.setValue("Appendix section")
+    await browser.keys("Enter")
+    await files.$("button=Appendix section").waitForDisplayed()
+
+    await browser.execute((css: string) => {
+      document.querySelector<HTMLElement>(css)!.click()
+    }, `${activeSidebar} [data-slot='file-sections'] [data-slot='bookmark-delete']`)
+    await expect(files.$("button=Appendix section")).not.toBeExisting()
+
+    await browser.keys(["Control", "z"])
+    await files.$("button=Appendix section").waitForDisplayed()
+  })
 })

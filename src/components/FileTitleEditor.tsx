@@ -1,4 +1,4 @@
-import { useRef } from "react"
+import { useEffect, useRef } from "react"
 
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
@@ -8,14 +8,22 @@ export function FileTitleEditor({
   className,
   label,
   onDone,
+  slot = "file-section-title-input",
   title,
 }: {
   className?: string
   label: string
   onDone: (title: string | null) => void
+  slot?: string
   title: string
 }) {
   const settledRef = useRef(false)
+  useEffect(() => {
+    settledRef.current = false
+    return () => {
+      settledRef.current = true
+    }
+  }, [])
   const settle = (value: string | null) => {
     if (!settledRef.current) {
       settledRef.current = true
@@ -28,7 +36,7 @@ export function FileTitleEditor({
       aria-label={label}
       autoFocus
       className={cn("h-7 flex-1 px-1.5", className)}
-      data-slot="file-section-title-input"
+      data-slot={slot}
       defaultValue={title}
       onBlur={(event) => settle(event.currentTarget.value)}
       onFocus={(event) => event.currentTarget.select()}

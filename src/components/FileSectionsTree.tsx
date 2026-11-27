@@ -57,6 +57,7 @@ type FileSectionsTreeProps = {
   currentPage: CurrentPage
   /** The files folded to their names, and their bookmarks folded, by key. */
   folds: OutlineFolds
+  onDeleteBookmark: (sectionId: number, path: number[], parentKey: string, index: number) => void
   onFoldsChange: (folds: OutlineFolds) => void
   /** A file dragged among the others: its pages go, whole, in front of
       1-based page `before`, or to the end. */
@@ -67,6 +68,7 @@ type FileSectionsTreeProps = {
   onPaste: (sectionId: number, index: number) => void
   onRemove: (sectionId: number) => void
   onRename: (sectionId: number, title: string) => void
+  onRenameBookmark: (sectionId: number, path: number[], title: string, previous: string) => void
   pages: PdfPageInfo[]
   ref?: Ref<FileSectionsTreeHandle>
   sections: PdfSection[]
@@ -105,19 +107,29 @@ export function FileSectionsTree({
   canPaste,
   currentPage,
   folds,
+  onDeleteBookmark,
   onFoldsChange,
   onMove,
   onNavigate,
   onPaste,
   onRemove,
   onRename,
+  onRenameBookmark,
   pages,
   ref,
   sections,
 }: FileSectionsTreeProps) {
   const { t } = useTranslation()
   const navRef = useRef<HTMLElement>(null)
-  const [editing, setEditing] = useState<string | null>(null)
+  const [editingState, setEditingState] = useState<{
+    key: string
+    sections: PdfSection[]
+  } | null>(null)
+  const editing = editingState && editingState.sections === sections ? editingState.key : null
+  const setEditing = useCallback(
+    (key: string | null) => setEditingState(key === null ? null : { key, sections }),
+    [sections],
+  )
   const listRef = useRef<HTMLUListElement>(null)
   const drop = useSidebarDrop()
 
@@ -234,13 +246,16 @@ export function FileSectionsTree({
                   canPaste={canPaste}
                   dragging={drag !== null}
                   editing={editing === rowKey}
+                  editingKey={editing}
                   folded={folds.has(fileFoldKey(section.id))}
                   folds={folds}
                   index={index}
                   key={rowKey}
                   lifted={drag?.index === index}
                   offset={drag?.cellOffsets[index] ?? 0}
+                  onDeleteBookmark={onDeleteBookmark}
                   onEdit={(on) => setEditing(on ? rowKey : null)}
+                  onEditKey={setEditing}
                   onNavigate={(pageNumber) => {
                     if (performance.now() - draggedAtRef.current >= DRAG_CLICK_WINDOW) {
                       onNavigate(pageNumber)
@@ -251,6 +266,7 @@ export function FileSectionsTree({
                   onPaste={onPaste}
                   onRemove={onRemove}
                   onRename={onRename}
+                  onRenameBookmark={onRenameBookmark}
                   onToggle={() => onFoldsChange(toggledFold(folds, fileFoldKey(section.id)))}
                   // A document keeps a page; the last file's go no further.
                   removeDisabled={(filePages.get(section.id) ?? 0) >= pages.length}
@@ -290,18 +306,22 @@ function FileRunRow({
   canPaste,
   dragging,
   editing,
+  editingKey,
   folded,
   folds,
   index,
   lifted,
   offset,
+  onDeleteBookmark,
   onEdit,
+  onEditKey,
   onFoldsChange,
   onNavigate,
   onNavigateBookmark,
   onPaste,
   onRemove,
   onRename,
+  onRenameBookmark,
   onToggle,
   removeDisabled,
   run,
@@ -312,18 +332,22 @@ function FileRunRow({
   canPaste: boolean
   dragging: boolean
   editing: boolean
+  editingKey: string | null
   folded: boolean
   folds: OutlineFolds
   index: number
   lifted: boolean
   offset: number
+  onDeleteBookmark: (sectionId: number, path: number[], parentKey: string, index: number) => void
   onEdit: (editing: boolean) => void
+  onEditKey: (key: string | null) => void
   onFoldsChange: (folds: OutlineFolds) => void
   onNavigate: (pageNumber: number) => void
   onNavigateBookmark: (pageNumber: number) => void
   onPaste: (sectionId: number, index: number) => void
   onRemove: (sectionId: number) => void
   onRename: (sectionId: number, title: string) => void
+  onRenameBookmark: (sectionId: number, path: number[], title: string, previous: string) => void
   onToggle: () => void
   removeDisabled: boolean
   run: FileRun
@@ -445,10 +469,18 @@ function FileRunRow({
         <ul className="pl-5">
           <BookmarkItems
             activeKey={activeBookmark}
+            editingKey={editingKey}
             folds={folds}
             items={outline}
+            onDelete={(path, parentKey, bookmarkIndex) =>
+              onDeleteBookmark(section.id, path, parentKey, bookmarkIndex)
+            }
+            onEdit={onEditKey}
             onFoldsChange={onFoldsChange}
             onNavigate={onNavigateBookmark}
+            onRename={(path, title, previous) =>
+              onRenameBookmark(section.id, path, title, previous)
+            }
             parentKey={sectionOutlineKey(section.id)}
             tree={nestsBookmarks(outline)}
           />

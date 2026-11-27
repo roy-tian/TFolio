@@ -280,6 +280,8 @@ const pt = {
     actionInsertFiles_one: "adicionar um arquivo",
     actionInsertFiles_other: "adicionar {{count}} arquivos",
     actionRenameFile: "renomear um arquivo",
+    actionRenameBookmark: "renomear um marcador",
+    actionDeleteBookmark: "excluir um marcador",
     actionSmartPadding: "iniciar os arquivos em página ímpar",
     actionFileBookmarks: "salvar um marcador por arquivo",
     saveForeign: "Foram adicionadas páginas de outros arquivos; só é possível salvar como um novo arquivo",
@@ -560,6 +562,9 @@ const pt = {
   bookmarks: {
     title: "Marcadores",
     untitled: "Marcador sem título",
+    name: "Nome do marcador",
+    rename: "Renomear {{name}}",
+    delete: "Excluir {{name}}",
   },
   sidebar: {
     show: "Mostrar barra lateral",

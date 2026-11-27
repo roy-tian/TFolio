@@ -278,6 +278,8 @@ const ko = {
     actionInsertFiles_one: "파일 {{count}}개 추가",
     actionInsertFiles_other: "파일 {{count}}개 추가",
     actionRenameFile: "파일 이름 바꾸기",
+    actionRenameBookmark: "책갈피 이름 바꾸기",
+    actionDeleteBookmark: "책갈피 삭제",
     actionSmartPadding: "파일을 홀수 페이지에서 시작",
     actionFileBookmarks: "파일마다 책갈피 저장",
     saveForeign: "다른 파일의 페이지가 추가되어 새 파일로만 저장할 수 있습니다",
@@ -558,6 +560,9 @@ const ko = {
   bookmarks: {
     title: "책갈피",
     untitled: "제목 없는 책갈피",
+    name: "책갈피 이름",
+    rename: "{{name}} 이름 바꾸기",
+    delete: "{{name}} 삭제",
   },
   sidebar: {
     show: "사이드바 표시",

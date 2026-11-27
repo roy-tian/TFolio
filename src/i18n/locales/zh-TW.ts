@@ -276,6 +276,8 @@ const zhTW = {
     actionInsertFiles_one: "加入檔案",
     actionInsertFiles_other: "加入 {{count}} 個檔案",
     actionRenameFile: "重新命名檔案",
+    actionRenameBookmark: "重新命名書籤",
+    actionDeleteBookmark: "刪除書籤",
     actionSmartPadding: "檔案從奇數頁開始",
     actionFileBookmarks: "每個檔案儲存一個書籤",
     saveForeign: "已加入其他檔案的頁面，只能另存新檔",
@@ -553,6 +555,9 @@ const zhTW = {
   bookmarks: {
     title: "書籤",
     untitled: "未命名書籤",
+    name: "書籤名稱",
+    rename: "重新命名 {{name}}",
+    delete: "刪除 {{name}}",
   },
   sidebar: {
     show: "顯示側欄",

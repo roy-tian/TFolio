@@ -96,7 +96,12 @@ import { documentPlainText } from "@/lib/documentText"
 import type { CarriedPages } from "@/lib/pageCarry"
 import { forgetDocumentText } from "@/lib/pageText"
 import { transientDocumentRefusals, workspaceOwner } from "@/lib/notices"
-import { NO_FOLDS, sectionOutlineKey, type OutlineFolds } from "@/lib/outlineFolds"
+import {
+  foldsAfterBookmarkDelete,
+  NO_FOLDS,
+  sectionOutlineKey,
+  type OutlineFolds,
+} from "@/lib/outlineFolds"
 import { storedSignatureHandling } from "@/lib/signatureHandling"
 import { e2eOverride } from "@/lib/e2e"
 import { createSingleFlightGate } from "@/lib/fileDialogGate"
@@ -1367,6 +1372,24 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       [annotations],
     )
 
+    const renameBookmark = useCallback(
+      (path: number[], title: string, previous: string, sectionId?: number) => {
+        void annotations.renameBookmark(path, title, previous, sectionId)
+      },
+      [annotations],
+    )
+
+    const deleteBookmark = useCallback(
+      (path: number[], parentKey: string, index: number, sectionId?: number) => {
+        void annotations.deleteBookmark(path, sectionId).then((landed) => {
+          if (landed) {
+            setOutlineFolds((current) => foldsAfterBookmarkDelete(current, parentKey, index))
+          }
+        })
+      },
+      [annotations],
+    )
+
     /** Undoable for this document, and remembered as the reader's choice for
         the next document files are added to. */
     const changeFileOptions = useCallback(
@@ -2396,12 +2419,18 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               canPaste={canPastePages}
               currentPage={currentPage}
               folds={outlineFolds}
+              onDeleteBookmark={(sectionId, path, parentKey, index) =>
+                deleteBookmark(path, parentKey, index, sectionId)
+              }
               onFoldsChange={setOutlineFolds}
               onMove={moveFile}
               onNavigate={navigateFromSidebar}
               onPaste={pasteIntoFile}
               onRemove={removeSection}
               onRename={renameSection}
+              onRenameBookmark={(sectionId, path, title, previous) =>
+                renameBookmark(path, title, previous, sectionId)
+              }
               pages={pdfDocument.pages}
               ref={filesTreeRef}
               sections={sections}
@@ -2412,8 +2441,14 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               currentPage={currentPage}
               folds={outlineFolds}
               items={outline}
+              onDeleteBookmark={(path, parentKey, index) =>
+                deleteBookmark(path, parentKey, index, outlineFile?.id)
+              }
               onFoldsChange={setOutlineFolds}
               onNavigate={navigateFromSidebar}
+              onRenameBookmark={(path, title, previous) =>
+                renameBookmark(path, title, previous, outlineFile?.id)
+              }
               rootKey={outlineFile ? sectionOutlineKey(outlineFile.id) : undefined}
             />
           ) : (

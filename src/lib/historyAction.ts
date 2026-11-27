@@ -21,6 +21,8 @@ type PlainActionKey =
   | "annotate.actionReorderPages"
   | "annotate.actionInsertBlankPage"
   | "annotate.actionRenameFile"
+  | "annotate.actionRenameBookmark"
+  | "annotate.actionDeleteBookmark"
   | "annotate.actionSmartPadding"
   | "annotate.actionFileBookmarks"
 
@@ -82,6 +84,10 @@ export function historyAction(command: AnnotationCommand): HistoryAction {
       return { count: command.titles.length, key: "annotate.actionInsertFiles" }
     case "renameSection":
       return { key: "annotate.actionRenameFile" }
+    case "renameBookmark":
+      return { key: "annotate.actionRenameBookmark" }
+    case "deleteBookmark":
+      return { key: "annotate.actionDeleteBookmark" }
     case "fileOptions":
       return {
         key:

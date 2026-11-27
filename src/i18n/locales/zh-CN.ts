@@ -268,6 +268,8 @@ const zhCN = {
     actionInsertFiles_one: "添加文件",
     actionInsertFiles_other: "添加 {{count}} 个文件",
     actionRenameFile: "重命名文件",
+    actionRenameBookmark: "重命名书签",
+    actionDeleteBookmark: "删除书签",
     actionSmartPadding: "文件从奇数页开始",
     actionFileBookmarks: "每个文件保存一个书签",
     saveForeign: "已拼入其他文件的页面，只能另存为新文件",
@@ -536,6 +538,9 @@ const zhCN = {
   bookmarks: {
     title: "书签",
     untitled: "未命名书签",
+    name: "书签名称",
+    rename: "重命名 {{name}}",
+    delete: "删除 {{name}}",
   },
   sidebar: {
     show: "显示侧栏",

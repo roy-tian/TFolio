@@ -279,6 +279,8 @@ const ja = {
     actionInsertFiles_one: "{{count}} 個のファイルの追加",
     actionInsertFiles_other: "{{count}} 個のファイルの追加",
     actionRenameFile: "ファイル名の変更",
+    actionRenameBookmark: "しおり名の変更",
+    actionDeleteBookmark: "しおりの削除",
     actionSmartPadding: "各ファイルの奇数ページ開始",
     actionFileBookmarks: "ファイルごとのしおりの保存",
     saveForeign: "他のファイルのページが追加されているため、新しいファイルとしてのみ保存できます",
@@ -562,6 +564,9 @@ const ja = {
   bookmarks: {
     title: "しおり",
     untitled: "無題のしおり",
+    name: "しおり名",
+    rename: "{{name}} の名前を変更",
+    delete: "{{name}} を削除",
   },
   sidebar: {
     show: "サイドバーを表示",

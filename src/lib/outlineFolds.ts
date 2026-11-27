@@ -54,6 +54,44 @@ export function toggledFold(folds: OutlineFolds, key: string): OutlineFolds {
   return next
 }
 
+/** Drops fold keys for the deleted bookmark and its descendants, and shifts
+    later sibling keys under `parentKey` down by one. */
+export function foldsAfterBookmarkDelete(
+  folds: OutlineFolds,
+  parentKey: string,
+  index: number,
+): OutlineFolds {
+  const prefix = `${parentKey}-`
+  const next = new Set<string>()
+
+  for (const key of folds) {
+    if (!key.startsWith(prefix)) {
+      next.add(key)
+      continue
+    }
+
+    const tail = key.slice(prefix.length)
+    const dash = tail.indexOf("-")
+    const segment = dash < 0 ? tail : tail.slice(0, dash)
+    const rest = dash < 0 ? "" : tail.slice(dash)
+
+    if (!/^\d+$/.test(segment)) {
+      next.add(key)
+      continue
+    }
+
+    const siblingIndex = Number(segment)
+
+    if (siblingIndex === index) {
+      continue
+    }
+
+    next.add(siblingIndex > index ? `${prefix}${siblingIndex - 1}${rest}` : key)
+  }
+
+  return next
+}
+
 /**
  * Folding and unfolding the whole outline: `top` are the folds its first
  * level shows, `all` every fold there is beneath them too. Folding folds them

@@ -278,6 +278,8 @@ const th = {
     actionInsertFiles_one: "การเพิ่ม {{count}} ไฟล์",
     actionInsertFiles_other: "การเพิ่ม {{count}} ไฟล์",
     actionRenameFile: "การเปลี่ยนชื่อไฟล์",
+    actionRenameBookmark: "การเปลี่ยนชื่อบุ๊กมาร์ก",
+    actionDeleteBookmark: "การลบบุ๊กมาร์ก",
     actionSmartPadding: "การเริ่มไฟล์ที่หน้าคี่",
     actionFileBookmarks: "การบันทึกบุ๊กมาร์กต่อไฟล์",
     saveForeign: "มีการเพิ่มหน้าจากไฟล์อื่น จึงบันทึกได้เป็นไฟล์ใหม่เท่านั้น",
@@ -556,6 +558,9 @@ const th = {
   bookmarks: {
     title: "บุ๊กมาร์ก",
     untitled: "บุ๊กมาร์กไม่มีชื่อ",
+    name: "ชื่อบุ๊กมาร์ก",
+    rename: "เปลี่ยนชื่อ {{name}}",
+    delete: "ลบ {{name}}",
   },
   sidebar: {
     show: "แสดงแถบด้านข้าง",

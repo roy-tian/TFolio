@@ -196,6 +196,23 @@ export type RenameSectionCommand = {
   title: string
 }
 
+/** A bookmark's title in the document or in one of its sections. */
+export type RenameBookmarkCommand = {
+  kind: "renameBookmark"
+  path: number[]
+  previous: string
+  sectionId?: number
+  title: string
+}
+
+/** A bookmark (and its descendants) removed from the document or a section. */
+export type DeleteBookmarkCommand = {
+  kind: "deleteBookmark"
+  path: number[]
+  sectionId?: number
+  stashId: number
+}
+
 /** How the document's files are laid out and saved; no page changes. */
 export type FileOptionsCommand = {
   kind: "fileOptions"
@@ -230,6 +247,8 @@ export type AnnotationCommand =
   | InsertPagesCommand
   | InsertFilesCommand
   | RenameSectionCommand
+  | RenameBookmarkCommand
+  | DeleteBookmarkCommand
   | FileOptionsCommand
   | EraseAnnotationCommand
 
@@ -363,6 +382,8 @@ export function commandPageChange(
       }
     // A name or a choice changes; every page stays where it is.
     case "renameSection":
+    case "renameBookmark":
+    case "deleteBookmark":
     case "fileOptions":
       return { movement: "inPlace" }
     default:
@@ -400,6 +421,8 @@ export function commandPages(command: AnnotationCommand): number[] {
       // `pageCount` spans before and after, covering the apply and the undo alike.
       return pagesFrom(command.index, command.pageCount)
     case "renameSection":
+    case "renameBookmark":
+    case "deleteBookmark":
     case "fileOptions":
       return []
     case "eraseAnnotation":
@@ -423,6 +446,8 @@ export function movesPages(command: AnnotationCommand): boolean {
     case "insertFiles":
       return true
     case "renameSection":
+    case "renameBookmark":
+    case "deleteBookmark":
     case "fileOptions":
     case "highlight":
     case "rect":
@@ -775,6 +800,55 @@ export function planRenameSection(
   return { command, history: commit(history, command) }
 }
 
+/** Whether a reader-supplied bookmark title changes an existing non-empty entry. */
+export function canRenameBookmark(path: number[], title: string, previous: string) {
+  const trimmed = title.trim()
+
+  return path.length > 0 && trimmed !== "" && trimmed !== previous
+}
+
+/** A title the bookmark already has takes no undo step. */
+export function planRenameBookmark(
+  history: AnnotationHistory,
+  path: number[],
+  title: string,
+  previous: string,
+  sectionId?: number,
+) {
+  if (!canRenameBookmark(path, title, previous)) {
+    return null
+  }
+
+  const command: RenameBookmarkCommand = {
+    kind: "renameBookmark",
+    path,
+    previous,
+    ...(sectionId === undefined ? {} : { sectionId }),
+    title: title.trim(),
+  }
+
+  return { command, history: commit(history, command) }
+}
+
+export function planDeleteBookmark(
+  history: AnnotationHistory,
+  path: number[],
+  sectionId?: number,
+) {
+  if (path.length === 0) {
+    return null
+  }
+
+  const command: DeleteBookmarkCommand = {
+    kind: "deleteBookmark",
+    path,
+    ...(sectionId === undefined ? {} : { sectionId }),
+    stashId: history.nextId,
+  }
+
+  return { command, history: commit(history, command) }
+}
+
 /** The active session watermark implied by the applied side of history. */
 export function watermarkConfig(
   history: AnnotationHistory,
@@ -838,7 +912,12 @@ function pageNumbersStale(history: AnnotationHistory): boolean {
       return false
     }
 
-    if (kind !== "renameSection" && kind !== "watermark") {
+    if (
+      kind !== "renameSection" &&
+      kind !== "renameBookmark" &&
+      kind !== "deleteBookmark" &&
+      kind !== "watermark"
+    ) {
       return true
     }
   }

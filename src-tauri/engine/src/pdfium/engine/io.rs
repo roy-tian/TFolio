@@ -123,6 +123,7 @@ impl StagedFile {
 enum Staging {
     Staged(StagedFile),
     Outlined(Vec<u8>, Vec<OutlineNode>),
+    EditedOutline(Vec<u8>, Vec<outline::EditableOutlineItem>),
 }
 
 impl Drop for StagedFile {
@@ -533,16 +534,38 @@ impl PdfiumEngine {
             "this document was opened from bytes, so there is no file to save over".to_string()
         })?;
         let (version, loaded_len) = (entry.content_version, entry.loaded_len);
-        let staged = self.stage_document(entry, &path)?;
+        let edits = entry.outline_edits.clone();
 
-        drop(documents);
-        staged.commit().inspect_err(|_| {
-            self.after_failed_commit(document_id, |entry| {
-                if entry.content_version == version {
-                    entry.loaded_len = loaded_len;
-                }
-            });
-        })?;
+        if let Some(edits) = edits {
+            let bytes = self.document_bytes(entry)?;
+
+            drop(documents);
+
+            let written = outline::apply_outline_edits(bytes, &edits)
+                .and_then(|bytes| StagedFile::holding(&path, &bytes))
+                .and_then(StagedFile::commit);
+
+            if let Err(error) = written {
+                self.after_failed_commit(document_id, |entry| {
+                    if entry.content_version == version {
+                        entry.loaded_len = loaded_len;
+                    }
+                });
+
+                return Err(error);
+            }
+        } else {
+            let staged = self.stage_document(entry, &path)?;
+
+            drop(documents);
+            staged.commit().inspect_err(|_| {
+                self.after_failed_commit(document_id, |entry| {
+                    if entry.content_version == version {
+                        entry.loaded_len = loaded_len;
+                    }
+                });
+            })?;
+        }
         self.record_written(document_id, &path);
 
         Ok(())
@@ -663,7 +686,10 @@ impl PdfiumEngine {
         // So do an added file's pages left alone: PDFium's outline is still
         // the document's own, aimed at pages that may all be gone.
         let staging = match entry.save_as_layout() {
-            None => Staging::Staged(self.stage_document(entry, path)?),
+            None => match entry.outline_edits.clone() {
+                Some(edits) => Staging::EditedOutline(self.document_bytes(entry)?, edits),
+                None => Staging::Staged(self.stage_document(entry, path)?),
+            },
             Some((padding, nodes)) => {
                 let bytes = self.document_bytes(entry)?;
 
@@ -685,7 +711,9 @@ impl PdfiumEngine {
 
         let written = match staging {
             Staging::Staged(staged) => Ok(staged),
-            Staging::Outlined(bytes, nodes) => outline::write_outline(bytes, &nodes)
+            Staging::Outlined(bytes, nodes) => outline::replace_outline(bytes, &nodes)
+                .and_then(|bytes| StagedFile::holding(path, &bytes)),
+            Staging::EditedOutline(bytes, edits) => outline::apply_outline_edits(bytes, &edits)
                 .and_then(|bytes| StagedFile::holding(path, &bytes)),
         }
         .and_then(StagedFile::commit);
@@ -768,7 +796,7 @@ impl PdfiumEngine {
                 .save_to_bytes()
                 .map_err(|error| format!("PDFium could not write the document: {error}"))
                 .and_then(|bytes| self.padded(bytes, entry, &padding))
-                .and_then(|bytes| outline::write_outline(bytes, &nodes)),
+                .and_then(|bytes| outline::replace_outline(bytes, &nodes)),
         )
     }
 

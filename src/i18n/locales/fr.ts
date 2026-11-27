@@ -279,6 +279,8 @@ const fr = {
     actionInsertFiles_one: "l’ajout d’un fichier",
     actionInsertFiles_other: "l’ajout de {{count}} fichiers",
     actionRenameFile: "le renommage d’un fichier",
+    actionRenameBookmark: "le renommage d’un signet",
+    actionDeleteBookmark: "la suppression d’un signet",
     actionSmartPadding: "le début des fichiers sur une page impaire",
     actionFileBookmarks: "l’ajout d’un signet par fichier",
     saveForeign: "Des pages d’autres fichiers ont été ajoutées : enregistrement possible uniquement dans un nouveau fichier",
@@ -559,6 +561,9 @@ const fr = {
   bookmarks: {
     title: "Signets",
     untitled: "Signet sans titre",
+    name: "Nom du signet",
+    rename: "Renommer {{name}}",
+    delete: "Supprimer {{name}}",
   },
   sidebar: {
     show: "Afficher la barre latérale",
