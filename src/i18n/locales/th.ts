@@ -634,6 +634,7 @@ const th = {
     downloading: "กำลังดาวน์โหลด…",
     checking: "กำลังตรวจหาอัปเดต…",
     checkFailed: "ไม่สามารถตรวจหาอัปเดตได้",
+    openReleases: "ดาวน์โหลดด้วยตนเอง",
     copyright: "ลิขสิทธิ์ © 2026 Roy Tian",
   },
 } as const satisfies TranslationSchema

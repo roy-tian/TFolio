@@ -638,6 +638,7 @@ const ko = {
     downloading: "다운로드 중…",
     checking: "업데이트 확인 중…",
     checkFailed: "업데이트를 확인하지 못했습니다.",
+    openReleases: "수동 다운로드",
     copyright: "Copyright © 2026 Roy Tian",
   },
 } as const satisfies TranslationSchema

@@ -38,7 +38,10 @@ use recent::{
 };
 use settings::{set_settings, settings};
 use tauri::Manager;
-use update::{check_updates, download_update, install_update, update_status, UpdateState};
+use update::{
+    check_updates, download_update, install_update, open_update_releases, update_status,
+    UpdateState,
+};
 use window_state::WindowState;
 use windows::{find_open_file, open_new_window, AppWindows, DocumentOwners};
 
@@ -193,6 +196,7 @@ pub fn run() {
             check_updates,
             download_update,
             install_update,
+            open_update_releases,
             take_launch_files,
             open_new_window,
             quit_app,

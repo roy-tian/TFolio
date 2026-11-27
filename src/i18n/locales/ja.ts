@@ -642,6 +642,7 @@ const ja = {
     downloading: "ダウンロード中…",
     checking: "アップデートを確認中…",
     checkFailed: "アップデートを確認できませんでした。",
+    openReleases: "手動でダウンロード",
     copyright: "Copyright © 2026 Roy Tian",
   },
 } as const satisfies TranslationSchema

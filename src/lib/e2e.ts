@@ -11,6 +11,7 @@ export type E2eOverrides = {
   checkUpdates?: () => Promise<void>
   downloadUpdate?: () => Promise<void>
   installUpdate?: () => Promise<void>
+  openUpdateReleases?: () => Promise<void>
   /** Stands in for `quit_app`, which would end the process the spec drives. */
   quitApp?: () => Promise<void>
   /** Stands in for `cancel_word_open`, so a spec's stand-in conversion can

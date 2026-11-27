@@ -35,6 +35,9 @@ async function mockUpdater(status: AppUpdateStatus = { state: "available", versi
       installUpdate: async () => {
         document.documentElement.dataset.installRequested = "true"
       },
+      openUpdateReleases: async () => {
+        document.documentElement.dataset.releasesOpened = "true"
+      },
     }
   }, status)
 }
@@ -138,7 +141,10 @@ describe("About updates", () => {
     })
     await $("#settings-tab-about").click()
     await expect(offer()).toHaveText(expect.stringContaining("Could not check for updates."))
+    await expect($("[data-slot='about-update-error']")).toHaveText("offline")
     await expect(action()).not.toExist()
+    await $("[data-action='about-update-releases']").click()
+    expect(await browser.execute(() => document.documentElement.dataset.releasesOpened)).toBe("true")
   })
 
   it("uses the requested Chinese labels beside the current version", async () => {

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  formatUpdateError,
   isAppUpdateStatus,
   shouldShowUpdate,
   type AppUpdateStatus,
@@ -14,6 +15,13 @@ describe("isAppUpdateStatus", () => {
     )
     expect(isAppUpdateStatus({ state: "ready", version: "1.2.3" })).toBe(true)
     expect(isAppUpdateStatus({ state: "failed", version: "1.2.3" })).toBe(true)
+    expect(
+      isAppUpdateStatus({
+        state: "failed",
+        version: "1.2.3",
+        error: "operation timed out",
+      }),
+    ).toBe(true)
     expect(
       isAppUpdateStatus({
         state: "downloading",
@@ -33,6 +41,26 @@ describe("isAppUpdateStatus", () => {
     expect(
       isAppUpdateStatus({ state: "downloading", version: "1.2.3", total: 4 }),
     ).toBe(false)
+    expect(
+      isAppUpdateStatus({ state: "failed", version: "1.2.3", error: 42 }),
+    ).toBe(false)
+  })
+})
+
+describe("formatUpdateError", () => {
+  test("compacts string and Error messages and drops empty values", () => {
+    expect(formatUpdateError("  timed\n  out  ")).toBe("timed out")
+    expect(formatUpdateError(new Error("dns lookup failed"))).toBe(
+      "dns lookup failed",
+    )
+    expect(formatUpdateError("   ")).toBeNull()
+    expect(formatUpdateError(null)).toBeNull()
+  })
+
+  test("truncates very long error messages", () => {
+    const formatted = formatUpdateError("x".repeat(250))
+    expect(formatted?.length).toBe(200)
+    expect(formatted?.endsWith("…")).toBe(true)
   })
 })
 

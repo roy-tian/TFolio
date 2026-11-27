@@ -640,6 +640,7 @@ const pt = {
     downloading: "Baixando…",
     checking: "Verificando atualizações…",
     checkFailed: "Não foi possível verificar se há atualizações.",
+    openReleases: "Baixar manualmente",
     copyright: "Copyright © 2026 Roy Tian",
   },
 } as const satisfies TranslationSchema

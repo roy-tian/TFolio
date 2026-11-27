@@ -608,6 +608,7 @@ const zhCN = {
     downloading: "正在下载…",
     checking: "正在检查更新…",
     checkFailed: "检查更新失败。",
+    openReleases: "手动下载",
     copyright: "版权所有 © 2026 Roy Tian",
   },
 } as const satisfies TranslationSchema

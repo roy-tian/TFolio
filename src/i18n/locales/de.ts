@@ -639,6 +639,7 @@ const de = {
     downloading: "Wird heruntergeladen…",
     checking: "Suche nach Updates…",
     checkFailed: "Es konnte nicht nach Updates gesucht werden.",
+    openReleases: "Manuell herunterladen",
     copyright: "Copyright © 2026 Roy Tian",
   },
 } as const satisfies TranslationSchema

@@ -625,6 +625,7 @@ const zhTW = {
     downloading: "正在下載…",
     checking: "正在檢查更新…",
     checkFailed: "無法檢查更新。",
+    openReleases: "手動下載",
     copyright: "著作權所有 © 2026 Roy Tian",
   },
 } as const satisfies TranslationSchema

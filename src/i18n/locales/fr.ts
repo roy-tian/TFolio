@@ -639,6 +639,7 @@ const fr = {
     downloading: "Téléchargement…",
     checking: "Recherche de mises à jour…",
     checkFailed: "Impossible de rechercher les mises à jour.",
+    openReleases: "Télécharger manuellement",
     copyright: "Copyright © 2026 Roy Tian",
   },
 } as const satisfies TranslationSchema

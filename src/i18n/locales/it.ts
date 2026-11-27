@@ -637,6 +637,7 @@ const it = {
     downloading: "Download in corso…",
     checking: "Ricerca di aggiornamenti…",
     checkFailed: "Impossibile verificare la disponibilità di aggiornamenti.",
+    openReleases: "Scarica manualmente",
     copyright: "Copyright © 2026 Roy Tian",
   },
 } as const satisfies TranslationSchema

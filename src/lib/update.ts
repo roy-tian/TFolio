@@ -17,10 +17,11 @@ export type AppUpdateStatus =
       total: number | null
     }
   | { state: "ready"; version: string }
-  | { state: "failed"; version: string }
+  | { state: "failed"; version: string; error?: string }
 
 /** Named in `src-tauri/src/update.rs` too; the two have to be changed together. */
 const UPDATE_CHANGED_EVENT = "update://changed"
+const MAX_ERROR_LENGTH = 200
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
@@ -38,8 +39,12 @@ export function isAppUpdateStatus(value: unknown): value is AppUpdateStatus {
       return true
     case "available":
     case "ready":
-    case "failed":
       return typeof value.version === "string"
+    case "failed":
+      return (
+        typeof value.version === "string" &&
+        (value.error === undefined || typeof value.error === "string")
+      )
     case "downloading":
       return (
         typeof value.version === "string" &&
@@ -96,6 +101,28 @@ export function checkUpdates(): Promise<void> {
   return invoke("check_updates")
 }
 
+/** Normalizes an updater failure into a single-line diagnostic summary. */
+export function formatUpdateError(error: unknown): string | null {
+  const raw =
+    typeof error === "string"
+      ? error
+      : error instanceof Error
+        ? error.message
+        : null
+  if (!raw) {
+    return null
+  }
+
+  const compact = raw.replace(/\s+/g, " ").trim()
+  if (compact.length === 0) {
+    return null
+  }
+
+  return compact.length > MAX_ERROR_LENGTH
+    ? `${compact.slice(0, MAX_ERROR_LENGTH - 1)}…`
+    : compact
+}
+
 export function installUpdate(): Promise<void> {
   const override = e2eOverride("installUpdate")
   if (override) {
@@ -103,4 +130,13 @@ export function installUpdate(): Promise<void> {
   }
 
   return invoke("install_update")
+}
+
+export function openUpdateReleases(): Promise<void> {
+  const override = e2eOverride("openUpdateReleases")
+  if (override) {
+    return override()
+  }
+
+  return invoke("open_update_releases")
 }

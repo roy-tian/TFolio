@@ -636,6 +636,7 @@ const en = {
     downloading: "Downloading…",
     checking: "Checking for updates…",
     checkFailed: "Could not check for updates.",
+    openReleases: "Download manually",
     copyright: "Copyright © 2026 Roy Tian",
   },
 } as const

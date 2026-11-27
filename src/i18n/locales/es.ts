@@ -638,6 +638,7 @@ const es = {
     downloading: "Descargando…",
     checking: "Buscando actualizaciones…",
     checkFailed: "No se pudo comprobar si hay actualizaciones.",
+    openReleases: "Descargar manualmente",
     copyright: "Copyright © 2026 Roy Tian",
   },
 } as const satisfies TranslationSchema
