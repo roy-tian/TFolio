@@ -886,10 +886,15 @@ fn basis(engine: &PdfiumEngine, entry: &mut OpenDocument) -> Result<Basis, Strin
         _ => {
             let mut rewritten = match engine.combined_bytes(entry) {
                 Some(combined) => combined?,
-                None => entry
-                    .document
-                    .save_to_bytes()
-                    .map_err(|error| format!("PDFium could not rewrite the document: {error}"))?,
+                None => {
+                    let bytes = entry.document.save_to_bytes().map_err(|error| {
+                        format!("PDFium could not rewrite the document: {error}")
+                    })?;
+                    match entry.outline_edits.as_deref() {
+                        Some(edits) => outline::apply_outline_edits(bytes, edits)?,
+                        None => bytes,
+                    }
+                }
             };
 
             if flattens {

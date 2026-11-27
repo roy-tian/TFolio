@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react"
 import { useRef } from "react"
+import type { TFunction } from "i18next"
 import { useTranslation } from "react-i18next"
 
 import { InsertAfterIcon, InsertBeforeIcon } from "@/components/InsertPageIcon"
@@ -19,6 +20,7 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
 } from "@/components/ui/context-menu"
+import type { NativeContextMenuItem } from "@/lib/nativeMenu"
 
 /** Before the first of the menu's pages, or after the last. */
 export type PageMenuSide = "before" | "after"
@@ -138,16 +140,7 @@ export function PageMenuItems({
 /** Where in a file a paste lands: before its first page, or after its last. */
 export type FileMenuEnd = "start" | "end"
 
-/** A file's right-click menu, by its name over its pages or in the tree of
-    files: what its hover buttons do, and pastes that join it at either end. */
-export function FileMenuContent({
-  canPaste,
-  onPaste,
-  onRemove,
-  onRename,
-  onSelect,
-  removeDisabled,
-}: {
+export type FileMenuActions = {
   canPaste: boolean
   onPaste: (end: FileMenuEnd) => void
   onRemove: () => void
@@ -157,7 +150,150 @@ export function FileMenuContent({
   onSelect?: () => void
   /** A document keeps a page; its last file stays. */
   removeDisabled: boolean
-}) {
+}
+
+export function buildPageMenuItems(
+  { canPaste, count, deleteDisabled = false }: PageMenuActions,
+  t: TFunction,
+): NativeContextMenuItem[] {
+  const items: NativeContextMenuItem[] = [
+    { kind: "item", id: "rotate-pages", label: t("pageEdit.rotateRight", { count }) },
+    { kind: "item", id: "rotate-pages-left", label: t("pageEdit.rotateLeft", { count }) },
+    { kind: "separator" },
+    { kind: "item", id: "cut-pages", label: t("pageEdit.cut", { count }) },
+    { kind: "item", id: "copy-pages", label: t("pageEdit.copy", { count }) },
+  ]
+
+  if (canPaste) {
+    items.push(
+      { kind: "item", id: "paste-pages-before", label: t("pageEdit.pasteBefore") },
+      { kind: "item", id: "paste-pages-after", label: t("pageEdit.pasteAfter") },
+    )
+  }
+
+  items.push(
+    { kind: "item", id: "insert-blank-before", label: t("pageEdit.insertBlankBefore") },
+    { kind: "item", id: "insert-blank-after", label: t("pageEdit.insertBlankAfter") },
+    { kind: "separator" },
+    { kind: "item", id: "extract-pages", label: t("tabs.newFromPages", { count }) },
+    { kind: "separator" },
+    {
+      enabled: !deleteDisabled,
+      id: "delete-pages",
+      kind: "item",
+      label: t("pageEdit.delete", { count }),
+    },
+  )
+
+  return items
+}
+
+export function runPageMenuAction(actionId: string, actions: PageMenuActions): boolean {
+  switch (actionId) {
+    case "rotate-pages":
+      actions.onRotate(90)
+      return true
+    case "rotate-pages-left":
+      actions.onRotate(270)
+      return true
+    case "cut-pages":
+      actions.onCut()
+      return true
+    case "copy-pages":
+      actions.onCopy()
+      return true
+    case "paste-pages-before":
+      actions.onPaste("before")
+      return true
+    case "paste-pages-after":
+      actions.onPaste("after")
+      return true
+    case "insert-blank-before":
+      actions.onInsertBlank("before")
+      return true
+    case "insert-blank-after":
+      actions.onInsertBlank("after")
+      return true
+    case "extract-pages":
+      actions.onExtract()
+      return true
+    case "delete-pages":
+      if (!actions.deleteDisabled) {
+        actions.onDelete()
+      }
+      return true
+    default:
+      return false
+  }
+}
+
+export function buildFileMenuItems(
+  { canPaste, onSelect, removeDisabled }: FileMenuActions,
+  t: TFunction,
+): NativeContextMenuItem[] {
+  const items: NativeContextMenuItem[] = []
+
+  if (onSelect) {
+    items.push({ kind: "item", id: "select-file", label: t("pageEdit.selectFile") })
+  }
+
+  items.push({ kind: "item", id: "rename-file", label: t("pageEdit.renameFile") })
+
+  if (canPaste) {
+    items.push(
+      { kind: "separator" },
+      { kind: "item", id: "paste-file-start", label: t("pageEdit.pasteFileStart") },
+      { kind: "item", id: "paste-file-end", label: t("pageEdit.pasteFileEnd") },
+    )
+  }
+
+  items.push(
+    { kind: "separator" },
+    {
+      enabled: !removeDisabled,
+      id: "remove-file",
+      kind: "item",
+      label: t("pageEdit.removeFile"),
+    },
+  )
+
+  return items
+}
+
+export function runFileMenuAction(actionId: string, actions: FileMenuActions): boolean {
+  switch (actionId) {
+    case "select-file":
+      actions.onSelect?.()
+      return true
+    case "rename-file":
+      actions.onRename()
+      return true
+    case "paste-file-start":
+      actions.onPaste("start")
+      return true
+    case "paste-file-end":
+      actions.onPaste("end")
+      return true
+    case "remove-file":
+      if (!actions.removeDisabled) {
+        actions.onRemove()
+      }
+      return true
+    default:
+      return false
+  }
+}
+
+/** A file's right-click menu, by its name over its pages or in the tree of
+    files: what its hover buttons do, and pastes that join it at either end. */
+export function FileMenuContent({
+  canPaste,
+  onPaste,
+  onRemove,
+  onRename,
+  onSelect,
+  removeDisabled,
+}: FileMenuActions) {
   const { t } = useTranslation()
   // Never reset: each opening of the menu mounts this anew.
   const renameAskedRef = useRef(false)

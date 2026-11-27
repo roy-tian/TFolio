@@ -545,4 +545,121 @@ describe("TFolio select all", () => {
       "false",
     )
   })
+
+  it("forbids selecting UI chrome while keeping PDF text and inputs selectable", async () => {
+    const userSelectOf = () =>
+      browser.execute(() => {
+        const readSelect = (selector: string) => {
+          const element = document.querySelector(selector)
+
+          if (!element) {
+            return null
+          }
+
+          const style = getComputedStyle(element)
+
+          return style.userSelect || style.webkitUserSelect
+        }
+
+        return {
+          body: readSelect("body"),
+          homeTab: readSelect("[role='tab']"),
+          dropZone: readSelect("[data-slot='drop-zone']"),
+          recentHeading: readSelect("[data-slot='recent-files'] h2"),
+        }
+      })
+
+    const home = await userSelectOf()
+    expect(home.body).toBe("none")
+    expect(home.homeTab).toBe("none")
+    expect(home.dropZone).toBe("none")
+    expect(home.recentHeading).toBe("none")
+
+    await openPdfFromDisk("select-policy.pdf", textPdf(2))
+    await renderedPage()
+    await $(".pdf-text-layer span").waitForExist({ timeout: 15_000 })
+
+    // Open search and watermark dialogs to check both toolbar/status-bar chrome
+    // and editable fields (page number, search input, settings input).
+    await $("button[aria-label='Search this PDF']").click()
+    const searchInput = $("input[aria-label='Search text in current PDF']")
+    await searchInput.waitForDisplayed()
+    await searchInput.setValue("Highlight")
+
+    const inViewer = await browser.execute(() => {
+      const readSelect = (selector: string) => {
+        const element = document.querySelector(selector)
+
+        if (!element) {
+          return null
+        }
+
+        const style = getComputedStyle(element)
+
+        return style.userSelect || style.webkitUserSelect
+      }
+
+      return {
+        toolbar: readSelect("[data-document-session][data-active='true'] [data-slot='toolbar']"),
+        statusBar: readSelect("[data-document-session][data-active='true'] [data-slot='status-bar']"),
+        viewerScrollRoot: readSelect("[data-document-session][data-active='true'] [data-pdf-scroll-root]"),
+        pageText: readSelect(".pdf-text-layer"),
+        pageInput: readSelect("input[aria-label='Page number']"),
+        searchInput: readSelect("input[aria-label='Search text in current PDF']"),
+      }
+    })
+    expect(inViewer.toolbar).toBe("none")
+    expect(inViewer.statusBar).toBe("none")
+    expect(inViewer.viewerScrollRoot).toBe("none")
+    expect(inViewer.pageText).toBe("text")
+    expect(inViewer.pageInput).toBe("text")
+    expect(inViewer.searchInput).toBe("text")
+
+    await searchInput.click()
+    await browser.keys(["Control", "a"])
+    const selectedSearch = await browser.execute(() => {
+      const input = document.activeElement as HTMLInputElement
+
+      return input.value.slice(input.selectionStart ?? 0, input.selectionEnd ?? 0)
+    })
+    expect(selectedSearch).toBe("Highlight")
+
+    await $("button[aria-label='Watermark']").click()
+    await $("[data-testid='watermark-dialog']").waitForDisplayed({ timeout: 15_000 })
+    const watermarkInput = $("[data-testid='watermark-text']")
+    await watermarkInput.waitForDisplayed()
+    await watermarkInput.setValue("DRAFT")
+
+    const inWatermark = await browser.execute(() => {
+      const readSelect = (selector: string) => {
+        const element = document.querySelector(selector)
+
+        if (!element) {
+          return null
+        }
+
+        const style = getComputedStyle(element)
+
+        return style.userSelect || style.webkitUserSelect
+      }
+
+      return {
+        dialogTitle: readSelect("[data-testid='watermark-dialog'] [data-slot='dialog-title']"),
+        dialogDescription: readSelect("[data-testid='watermark-dialog'] [data-slot='dialog-description']"),
+        watermarkInput: readSelect("[data-testid='watermark-text']"),
+      }
+    })
+    expect(inWatermark.dialogTitle).toBe("none")
+    expect(inWatermark.dialogDescription).toBe("none")
+    expect(inWatermark.watermarkInput).toBe("text")
+
+    await watermarkInput.click()
+    await browser.keys(["Control", "a"])
+    const selectedWatermark = await browser.execute(() => {
+      const input = document.activeElement as HTMLInputElement
+
+      return input.value.slice(input.selectionStart ?? 0, input.selectionEnd ?? 0)
+    })
+    expect(selectedWatermark).toBe("DRAFT")
+  })
 })

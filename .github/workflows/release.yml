@@ -151,8 +151,9 @@ jobs:
       - name: Download PDFium runtime
         run: bun run pdfium:download --target ${{ matrix.pdfium_target }}
 
-      # latest.json addresses assets by id, which survives publishing, so the
-      # updater feed stays valid although the tag does not exist yet.
+      # tauri-action writes draft-safe api.github.com asset URLs into latest.json;
+      # publish-release rewrites them to tag download URLs before publishing so
+      # clients avoid api.github.com's unauthenticated rate limit.
       - name: Build and upload Tauri bundles
         uses: tauri-apps/tauri-action@v1
         env:
@@ -205,6 +206,48 @@ jobs:
         env:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: bun run changelog > "$RUNNER_TEMP/release-notes.md"
+
+      # Draft assets get api.github.com URLs from tauri-action, which hit
+      # GitHub's 60 req/hr unauthenticated IP rate limit for clients. Rewrite
+      # latest.json to tag download URLs before making the release public.
+      - name: Rewrite updater manifest URLs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          gh api --paginate "repos/$GH_REPO/releases/$RELEASE_ID/assets" > "$RUNNER_TEMP/assets.json"
+          manifest_id=$(jq -rs 'add | .[] | select(.name == "latest.json") | .id' "$RUNNER_TEMP/assets.json")
+          if [ -z "$manifest_id" ]; then
+            echo "::error::latest.json is missing from draft release $RELEASE_ID."
+            exit 1
+          fi
+
+          gh api -H "Accept: application/octet-stream" \
+            "repos/$GH_REPO/releases/assets/$manifest_id" > "$RUNNER_TEMP/latest.json"
+
+          jq --slurpfile assets "$RUNNER_TEMP/assets.json" \
+            --arg repo "$GH_REPO" \
+            --arg tag "$RELEASE_TAG" '
+              ($assets | add | map({
+                (.url): ("https://github.com/" + $repo + "/releases/download/" + ($tag | @uri) + "/" + (.name | @uri))
+              }) | add) as $urls
+              | .platforms |= with_entries(
+                  if (.value.url | startswith("https://api.github.com/")) then
+                    .value.url = ($urls[.value.url] // error("unmatched updater asset URL: " + .value.url))
+                  else
+                    .
+                  end
+                )
+            ' "$RUNNER_TEMP/latest.json" > "$RUNNER_TEMP/latest.rewritten.json"
+
+          gh api -X DELETE "repos/$GH_REPO/releases/assets/$manifest_id"
+          gh api -X POST \
+            "https://uploads.github.com/repos/$GH_REPO/releases/$RELEASE_ID/assets?name=latest.json" \
+            -H "Content-Type: application/json" \
+            --input "$RUNNER_TEMP/latest.rewritten.json" \
+            --silent
 
       - name: Publish completed release
         env:

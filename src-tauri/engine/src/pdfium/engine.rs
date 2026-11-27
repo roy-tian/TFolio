@@ -192,6 +192,11 @@ struct OpenDocument {
     signed_added: Vec<PathBuf>,
     /// What a copy of its pages may have to drop (`import_links`).
     linked: LinkedAnnotations,
+    /// In-memory edits and deletions to the document's own outline, applied
+    /// via `lopdf` when writing bytes (`save`, `export_to`, `compress`).
+    outline_edits: Option<Vec<outline::EditableOutlineItem>>,
+    /// Deleted bookmark subtrees awaiting undo, keyed by history entry id.
+    bookmark_stashes: HashMap<u64, bookmarks::BookmarkStash>,
 }
 
 impl OpenDocument {
@@ -674,6 +679,8 @@ impl PdfiumEngine {
                 foreign_page_ids: HashSet::new(),
                 signed_added: Vec::new(),
                 linked,
+                outline_edits: None,
+                bookmark_stashes: HashMap::new(),
             },
         );
         drop(documents);
@@ -1193,7 +1200,7 @@ fn page_infos(entry: &mut OpenDocument) -> Vec<PdfPageInfo> {
 fn structure_update(entry: &mut OpenDocument) -> PdfStructureUpdate {
     let pages = page_infos(entry);
     // Walked once: the own bookmarks are also what a split of them cuts at.
-    let outline = collect_bookmark_siblings(entry.document.bookmarks().root());
+    let outline = entry.effective_own_outline();
     let splits_by_bookmarks = archive_export::splits_at_bookmarks(
         entry.files_split_outline().as_deref().unwrap_or(&outline),
         pages.len() as i32,
@@ -1246,6 +1253,7 @@ fn collect_bookmark_siblings(mut bookmark: Option<PdfBookmark<'_>>) -> Vec<PdfOu
 
 mod a4_export;
 mod archive_export;
+mod bookmarks;
 mod compress;
 mod dedup;
 mod file_identity;

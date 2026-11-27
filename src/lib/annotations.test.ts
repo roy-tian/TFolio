@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test"
 
 import {
   canRedo,
+  canRenameBookmark,
   canUndo,
   commandPageChange,
   commandPages,
@@ -18,12 +19,14 @@ import {
   nextRedoCommand,
   nextUndoCommand,
   pageNumbersConfig,
+  planDeleteBookmark,
   planDeletePages,
   planDuplicatePages,
   planInsertPages,
   planEraseAnnotation,
   planInsertBlankPage,
   planPageNumbersChange,
+  planRenameBookmark,
   planReorderPages,
   planRotatePages,
   planWatermarkChange,
@@ -223,6 +226,8 @@ describe("pageNumbersConfig", () => {
       sectionId: 1,
       title: "b.pdf",
     })
+    const afterBookmarkRename = planRenameBookmark(applied, [0], "Ch 1", "Chapter 1")!.history
+    const afterBookmarkDelete = planDeleteBookmark(applied, [0])!.history
     const afterWatermarkOnly = commit(applied, watermark(defaultWatermarkConfig("DRAFT")))
 
     expect(planPageNumbersChange(afterBlank, first, 4)).not.toBeNull()
@@ -230,6 +235,8 @@ describe("pageNumbersConfig", () => {
     expect(planPageNumbersChange(afterPadding, first, 3)).not.toBeNull()
     expect(planPageNumbersChange(afterBlankThenWatermark, first, 4)).not.toBeNull()
     expect(planPageNumbersChange(afterRename, first, 3)).toBeNull()
+    expect(planPageNumbersChange(afterBookmarkRename, first, 3)).toBeNull()
+    expect(planPageNumbersChange(afterBookmarkDelete, first, 3)).toBeNull()
     expect(planPageNumbersChange(afterWatermarkOnly, first, 3)).toBeNull()
   })
 })
@@ -818,5 +825,46 @@ describe("insertPagesRange", () => {
         stashId: 4,
       }),
     ).toEqual([3, 4, 5])
+  })
+})
+
+describe("bookmark edits", () => {
+  it("plans a trimmed rename and skips empty, empty-path, or unchanged titles", () => {
+    const planned = planRenameBookmark(emptyHistory, [0, 1], "  New title  ", "Old title", 2)!
+
+    expect(planned.command).toEqual({
+      kind: "renameBookmark",
+      path: [0, 1],
+      previous: "Old title",
+      sectionId: 2,
+      title: "New title",
+    })
+    expect(commandPages(planned.command)).toEqual([])
+    expect(commandTextPages(planned.command)).toEqual([])
+    expect(movesPages(planned.command)).toBe(false)
+    expect(commandPageChange(planned.command, false)).toEqual({ movement: "inPlace" })
+    expect(canRenameBookmark([], "New", "Old")).toBe(false)
+    expect(canRenameBookmark([0], "   ", "Old")).toBe(false)
+    expect(canRenameBookmark([0], "  Old  ", "Old")).toBe(false)
+    expect(canRenameBookmark([0], "  New  ", "Old")).toBe(true)
+    expect(planRenameBookmark(emptyHistory, [], "New", "Old")).toBeNull()
+    expect(planRenameBookmark(emptyHistory, [0], "   ", "Old")).toBeNull()
+    expect(planRenameBookmark(emptyHistory, [0], "Old", "Old")).toBeNull()
+  })
+
+  it("plans a deletion with the entry id as its stash id", () => {
+    const history = historyOf(highlight(1))
+    const planned = planDeleteBookmark(history, [1, 0])!
+
+    expect(planned.command).toEqual({
+      kind: "deleteBookmark",
+      path: [1, 0],
+      stashId: history.nextId,
+    })
+    expect(planned.history.past.at(-1)!.id).toBe(planned.command.stashId)
+    expect(commandPages(planned.command)).toEqual([])
+    expect(movesPages(planned.command)).toBe(false)
+    expect(commandPageChange(planned.command, true)).toEqual({ movement: "inPlace" })
+    expect(planDeleteBookmark(emptyHistory, [])).toBeNull()
   })
 })

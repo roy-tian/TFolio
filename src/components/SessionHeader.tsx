@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils"
 type SessionHeaderProps = {
   active: boolean
   annotations: ReturnType<typeof useAnnotations>
-  appMenu: ReactNode
+  appMenu?: ReactNode
   canSave: boolean
   macOS: boolean
   onSave: () => void
@@ -142,7 +142,7 @@ export function SessionHeader({
 type ToolbarFrameProps = {
   /** Only the bar on show carries the menu and the window controls. */
   active: boolean
-  appMenu: ReactNode
+  appMenu?: ReactNode
   end?: ReactNode
   macOS: boolean
   /** The bar's own leading controls, after the sidebar's when it is not docked. */
@@ -184,10 +184,10 @@ export function ToolbarFrame({
       </div>
       <div className="flex items-center gap-1">
         {end}
-        {active ? (
+        {active && !macOS ? (
           <>
             {appMenu}
-            {macOS ? null : <WindowControls />}
+            <WindowControls />
           </>
         ) : null}
       </div>

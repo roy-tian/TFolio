@@ -3,7 +3,11 @@ import { useTranslation } from "react-i18next"
 
 import { Button } from "@/components/ui/button"
 import { AppUpdateContext } from "@/hooks/useAppUpdate"
-import { checkUpdates } from "@/lib/update"
+import {
+  checkUpdates,
+  formatUpdateError,
+  openUpdateReleases,
+} from "@/lib/update"
 
 /** Mounted only while About is visible, so both menu paths check on each visit. */
 export function AboutUpdate() {
@@ -11,12 +15,17 @@ export function AboutUpdate() {
   const update = useContext(AppUpdateContext)
   const [checking, setChecking] = useState(true)
   const [checkFailed, setCheckFailed] = useState(false)
+  const [checkError, setCheckError] = useState<string | null>(null)
 
   useEffect(() => {
     let live = true
     void checkUpdates()
-      .catch(() => {
-        if (live) setCheckFailed(true)
+      .catch((error: unknown) => {
+        console.warn("[updater] check failed:", error)
+        if (live) {
+          setCheckFailed(true)
+          setCheckError(formatUpdateError(error))
+        }
       })
       .finally(() => {
         if (live) setChecking(false)
@@ -28,6 +37,10 @@ export function AboutUpdate() {
   if (!update) return null
 
   const { status } = update
+  const failedError =
+    status.state === "failed" ? formatUpdateError(status.error) : null
+  const errorDetail = checkError ?? failedError ?? update.installError
+  const showReleases = checkFailed || status.state === "failed"
 
   return (
     <span aria-live="polite" data-slot="about-update">
@@ -57,6 +70,32 @@ export function AboutUpdate() {
         </>
       ) : checking ? t("about.checking") : null}
       {checkFailed ? ` ${t("about.checkFailed")}` : null}
+      {showReleases ? (
+        <>
+          {" "}
+          <Button
+            className="h-auto rounded-none p-0 align-baseline text-xs underline"
+            data-action="about-update-releases"
+            onClick={() => {
+              void openUpdateReleases().catch((error: unknown) => {
+                console.warn("[updater] open releases failed:", error)
+              })
+            }}
+            variant="link"
+          >
+            {t("about.openReleases")}
+          </Button>
+        </>
+      ) : null}
+      {errorDetail ? (
+        <span
+          className="mt-1 block break-all font-mono text-[11px] text-muted-foreground/80"
+          data-slot="about-update-error"
+          title={errorDetail}
+        >
+          {errorDetail}
+        </span>
+      ) : null}
     </span>
   )
 }

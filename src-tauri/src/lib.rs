@@ -1,5 +1,6 @@
 mod handoff;
 mod launch;
+mod native_menu;
 mod pdfium;
 mod quit;
 mod recent;
@@ -17,15 +18,16 @@ use pdfium::{
     add_pdf_text_note_annotation, apply_pdf_page_numbers, apply_pdf_watermark, cancel_pdf_archive,
     cancel_pdf_compression, cancel_pdf_compression_estimate, cancel_pdf_operation,
     cancel_pdf_search, cancel_word_conversion, cancel_word_open, close_pdf, create_pdf,
-    decide_pdf_signatures, delete_pdf_annotations, delete_pdf_pages, discard_pdf_stashes,
-    download_pdf_note_font, duplicate_pdf_pages, estimate_pdf_compression, export_compressed_pdf,
-    export_pdf, export_pdf_archive, extract_pdf_page_plain_text, extract_pdf_page_text,
-    extract_pdf_pages, fit_a4_pdf, flatten_pdf_signatures, insert_pdf_blank_page, insert_pdf_files,
-    insert_pdf_pages_from_document, merge_pdf_sources, open_converted_from_path, open_pdf,
-    open_pdf_from_path, pdf_annotation_at_point, pdf_file_changed, pdf_text_note_font,
-    pick_pdf_path, pick_pdf_paths, read_pdf_sources, release_pdf_compression, release_pdf_sources,
-    remove_pdf_page_numbers, remove_pdf_watermark, rename_pdf_section, render_pdf_page,
-    render_pdf_page_thumbnail, render_pdf_watermark_preview, reorder_pdf_pages,
+    decide_pdf_signatures, delete_pdf_annotations, delete_pdf_bookmark, delete_pdf_pages,
+    discard_pdf_stashes, download_pdf_note_font, duplicate_pdf_pages, estimate_pdf_compression,
+    export_compressed_pdf, export_pdf, export_pdf_archive, extract_pdf_page_plain_text,
+    extract_pdf_page_text, extract_pdf_pages, fit_a4_pdf, flatten_pdf_signatures,
+    insert_pdf_blank_page, insert_pdf_files, insert_pdf_pages_from_document, merge_pdf_sources,
+    open_converted_from_path, open_pdf, open_pdf_from_path, pdf_annotation_at_point,
+    pdf_file_changed, pdf_text_note_font, pick_pdf_path, pick_pdf_paths, read_pdf_sources,
+    release_pdf_compression, release_pdf_sources, remove_pdf_page_numbers, remove_pdf_watermark,
+    rename_pdf_bookmark, rename_pdf_section, render_pdf_page, render_pdf_page_thumbnail,
+    render_pdf_watermark_preview, reorder_pdf_pages, restore_pdf_bookmark,
     restore_pdf_page_numbers, restore_pdf_pages, rotate_pdf_pages, save_pdf, search_pdf_text,
     set_pdf_file_options, source_sizes, word_conversion_available, PdfiumState,
 };
@@ -38,7 +40,10 @@ use recent::{
 };
 use settings::{set_settings, settings};
 use tauri::Manager;
-use update::{check_updates, download_update, install_update, update_status, UpdateState};
+use update::{
+    check_updates, download_update, install_update, open_update_releases, update_status,
+    UpdateState,
+};
 use window_state::WindowState;
 use windows::{find_open_file, open_new_window, AppWindows, DocumentOwners};
 
@@ -82,11 +87,9 @@ pub fn run() {
     // Cmd+Q must reach the unsaved check; the Dock's Quit and a logout still
     // end the app unasked, since tao gives no hook to refuse them.
     #[cfg(target_os = "macos")]
-    let builder = builder.menu(quit::app_menu).on_menu_event(|app, event| {
-        if event.id().0 == quit::QUIT_MENU_ID {
-            quit::request_quit(app);
-        }
-    });
+    let builder = builder
+        .menu(native_menu::initial_app_menu)
+        .on_menu_event(native_menu::handle_menu_event);
 
     #[cfg(feature = "e2e")]
     let builder = builder
@@ -107,6 +110,7 @@ pub fn run() {
             app.manage(HandoffQueue::default());
             app.manage(AppWindows::default());
             app.manage(DocumentOwners::default());
+            app.manage(native_menu::NativeMenuState::default());
             app.manage(UpdateState::default());
             app.manage(WindowState::load(app.handle()));
             // Not in the GUI suite: a spec may not reach the network, and
@@ -136,18 +140,25 @@ pub fn run() {
             }
             tauri::WindowEvent::Focused(true) => {
                 windows::remember_focus(window.app_handle(), window.label());
+                #[cfg(target_os = "macos")]
+                native_menu::on_window_focused(window.app_handle());
                 window_state::remember(window.app_handle(), window)
             }
             tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_) => {
                 window_state::remember(window.app_handle(), window)
             }
             tauri::WindowEvent::Destroyed => {
-                windows::window_gone(window.app_handle(), window.label())
+                windows::window_gone(window.app_handle(), window.label());
+                #[cfg(target_os = "macos")]
+                native_menu::on_window_destroyed(window.app_handle(), window.label());
             }
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             window_background::set_workspace_background,
+            native_menu::sync_macos_menu,
+            native_menu::popup_context_menu,
+            native_menu::write_clipboard_text,
             create_pdf,
             open_pdf,
             open_pdf_from_path,
@@ -193,6 +204,7 @@ pub fn run() {
             check_updates,
             download_update,
             install_update,
+            open_update_releases,
             take_launch_files,
             open_new_window,
             quit_app,
@@ -212,6 +224,9 @@ pub fn run() {
             insert_pdf_pages_from_document,
             insert_pdf_files,
             merge_pdf_sources,
+            rename_pdf_bookmark,
+            delete_pdf_bookmark,
+            restore_pdf_bookmark,
             rename_pdf_section,
             release_pdf_sources,
             #[cfg(feature = "e2e")]

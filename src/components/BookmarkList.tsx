@@ -1,11 +1,13 @@
-import { useCallback, useMemo, useRef } from "react"
-import { Bookmark, ChevronRight } from "lucide-react"
+import { useCallback, useMemo, useRef, useState } from "react"
+import { Bookmark, ChevronRight, Pencil, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { FileTitleEditor } from "@/components/FileTitleEditor"
 import { HintTooltip } from "@/components/HintTooltip"
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import { SidebarDropEdge } from "@/components/SidebarFileDrop"
 import { OutlineBar } from "@/components/SidebarPanelTools"
+import { Button } from "@/components/ui/button"
 import { useCurrentPageSelector, type CurrentPage } from "@/hooks/useCurrentPage"
 import { useFollowOutlineRow } from "@/hooks/useFollowCurrentPage"
 import {
@@ -23,11 +25,16 @@ import { cn } from "@/lib/utils"
 
 type BookmarkItemsProps = {
   activeKey?: string | null
+  editingKey?: string | null
   folds: OutlineFolds
   items: PdfOutlineItem[]
+  onDelete?: (path: number[], parentKey: string, index: number) => void
+  onEdit?: (key: string | null) => void
   onFoldsChange: (folds: OutlineFolds) => void
   onNavigate: (pageNumber: number) => void
+  onRename?: (path: number[], title: string, previous: string) => void
   parentKey: string
+  parentPath?: number[]
   /** Whether the outline nests at all: a flat one keeps no room for arrows. */
   tree: boolean
 }
@@ -35,31 +42,44 @@ type BookmarkItemsProps = {
 /** The `li`s of one level, for a `ul` the caller owns. */
 export function BookmarkItems({
   activeKey = null,
+  editingKey = null,
   folds,
   items,
+  onDelete,
+  onEdit,
   onFoldsChange,
   onNavigate,
+  onRename,
   parentKey,
+  parentPath = [],
   tree,
 }: BookmarkItemsProps) {
   const { t } = useTranslation()
+  const editable = Boolean(onRename || onDelete)
 
   return items.map((item, index) => {
     const itemKey = bookmarkFoldKey(parentKey, index)
+    const itemPath = [...parentPath, index]
     const title = item.title.trim() || t("bookmarks.untitled")
     const nested = item.items.length > 0
     const open = nested && !folds.has(itemKey)
     const isActive = itemKey === activeKey
+    const isEditing = editingKey === itemKey
+    const renameLabel = t("bookmarks.rename", { name: title })
+    const deleteLabel = t("bookmarks.delete", { name: title })
 
     return (
       <li key={itemKey}>
+        {/* Hover and button focus-visible drive `--row-tools` directly on the
+            row so no `:has(...) *` or `:focus-within *` rule is shipped. */}
         <div
           className={cn(
-            "flex items-center rounded-md transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+            "relative flex items-center rounded-md transition-colors [--row-tools:0] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:[--row-tools:1] has-[[data-bookmark-row-tools]_:focus-visible]:bg-sidebar-accent has-[[data-bookmark-row-tools]_:focus-visible]:text-sidebar-accent-foreground has-[[data-bookmark-row-tools]_:focus-visible]:[--row-tools:1]",
             tree && "gap-1",
             isActive && "bg-sidebar-accent font-medium text-sidebar-accent-foreground",
           )}
           data-outline-current={isActive ? "" : undefined}
+          data-slot="bookmark-row"
         >
           {tree ? (
             nested ? (
@@ -80,38 +100,98 @@ export function BookmarkItems({
               <span aria-hidden className="size-6 shrink-0" />
             )
           ) : null}
-          {/* Beside the sidebar rather than over it: a title too long for a
-              column this narrow has nowhere to be read inside it. */}
-          <HintTooltip label={title} side="right">
-            <button
-              aria-current={isActive ? "location" : undefined}
-              className={cn(
-                "flex min-w-0 flex-1 items-center gap-2 rounded-md py-1.5 pr-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring disabled:cursor-default disabled:opacity-50",
-                !tree && "pl-2",
-              )}
-              disabled={!item.pageNumber}
-              onClick={() => item.pageNumber && onNavigate(item.pageNumber)}
-              type="button"
-            >
-              <Bookmark
-                className={cn(
-                  "size-3.5 shrink-0 text-muted-foreground",
-                  isActive && "text-primary",
-                )}
-              />
-              <span className="truncate">{title}</span>
-            </button>
-          </HintTooltip>
+          {isEditing ? (
+            <FileTitleEditor
+              className={cn("mr-1", !tree && "ml-1")}
+              label={t("bookmarks.name")}
+              onDone={(next) => {
+                onEdit?.(null)
+
+                if (next !== null) {
+                  onRename?.(itemPath, next, item.title)
+                }
+              }}
+              slot="bookmark-title-input"
+              title={item.title}
+            />
+          ) : (
+            <>
+              {/* Beside the sidebar rather than over it: a title too long for a
+                  column this narrow has nowhere to be read inside it. */}
+              <HintTooltip label={title} side="right">
+                <button
+                  aria-current={isActive ? "location" : undefined}
+                  className={cn(
+                    "flex min-w-0 flex-1 items-center gap-2 rounded-md py-1.5 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring disabled:cursor-default disabled:opacity-50",
+                    editable ? "pr-[calc(0.5rem+var(--row-tools)*3rem)]" : "pr-2",
+                    !tree && "pl-2",
+                  )}
+                  disabled={!item.pageNumber}
+                  onClick={() => item.pageNumber && onNavigate(item.pageNumber)}
+                  onDoubleClick={onRename ? () => onEdit?.(itemKey) : undefined}
+                  type="button"
+                >
+                  <Bookmark
+                    className={cn(
+                      "size-3.5 shrink-0 text-muted-foreground",
+                      isActive && "text-primary",
+                    )}
+                  />
+                  <span className="truncate">{title}</span>
+                </button>
+              </HintTooltip>
+              {editable ? (
+                <div
+                  className="absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-(--row-tools)"
+                  data-bookmark-row-tools
+                  data-slot="bookmark-tools"
+                >
+                  {onRename ? (
+                    <HintTooltip label={renameLabel}>
+                      <Button
+                        aria-label={renameLabel}
+                        data-slot="bookmark-rename"
+                        onClick={() => onEdit?.(itemKey)}
+                        size="icon-xs"
+                        variant="ghost"
+                      >
+                        <Pencil />
+                      </Button>
+                    </HintTooltip>
+                  ) : null}
+                  {onDelete ? (
+                    <HintTooltip label={deleteLabel}>
+                      <Button
+                        aria-label={deleteLabel}
+                        className="not-disabled:hover:text-destructive"
+                        data-slot="bookmark-delete"
+                        onClick={() => onDelete(itemPath, parentKey, index)}
+                        size="icon-xs"
+                        variant="ghost"
+                      >
+                        <X />
+                      </Button>
+                    </HintTooltip>
+                  ) : null}
+                </div>
+              ) : null}
+            </>
+          )}
         </div>
         {open ? (
           <ul className="pl-5">
             <BookmarkItems
               activeKey={activeKey}
+              editingKey={editingKey}
               folds={folds}
               items={item.items}
+              onDelete={onDelete}
+              onEdit={onEdit}
               onFoldsChange={onFoldsChange}
               onNavigate={onNavigate}
+              onRename={onRename}
               parentKey={itemKey}
+              parentPath={itemPath}
               tree
             />
           </ul>
@@ -126,8 +206,10 @@ type BookmarkListProps = {
   currentPage: CurrentPage
   folds: OutlineFolds
   items: PdfOutlineItem[]
+  onDeleteBookmark?: (path: number[], parentKey: string, index: number) => void
   onFoldsChange: (folds: OutlineFolds) => void
   onNavigate: (pageNumber: number) => void
+  onRenameBookmark?: (path: number[], title: string, previous: string) => void
   /** Whose bookmarks these are, as fold keys: the document's, or one file's. */
   rootKey?: string
 }
@@ -137,12 +219,22 @@ export function BookmarkList({
   currentPage,
   folds,
   items,
+  onDeleteBookmark,
   onFoldsChange,
   onNavigate,
+  onRenameBookmark,
   rootKey = DOCUMENT_OUTLINE_KEY,
 }: BookmarkListProps) {
   const { t } = useTranslation()
   const navRef = useRef<HTMLElement>(null)
+  const [editing, setEditing] = useState<{ items: PdfOutlineItem[]; key: string } | null>(null)
+  // Drop any in-flight title edit as soon as `items` updates underneath it so
+  // an index-keyed editor can never commit against a shifted sibling bookmark.
+  const editingKey = editing && editing.items === items ? editing.key : null
+  const setEditingKey = useCallback(
+    (key: string | null) => setEditing(key === null ? null : { items, key }),
+    [items],
+  )
   const keyForPage = useCallback(
     (pageNumber: number) =>
       items.length === 0 ? null : activeBookmarkKey(items, rootKey, pageNumber, folds),
@@ -168,6 +260,7 @@ export function BookmarkList({
     currentPage,
     keyForPage,
     navRef,
+    paused: editingKey !== null,
   })
 
   return (
@@ -196,10 +289,14 @@ export function BookmarkList({
             <ul>
               <BookmarkItems
                 activeKey={activeKey}
+                editingKey={editingKey}
                 folds={folds}
                 items={items}
+                onDelete={onDeleteBookmark}
+                onEdit={setEditingKey}
                 onFoldsChange={onFoldsChange}
                 onNavigate={onNavigate}
+                onRename={onRenameBookmark}
                 parentKey={rootKey}
                 tree={tree}
               />

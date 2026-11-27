@@ -37,6 +37,18 @@ const SIGNATURE_FILE_NAME: &str = "pending.json";
 
 const UNMEASURED_STEP_BYTES: u64 = 1 << 20;
 
+/// One initial attempt plus four retries: GitHub release connections can stall
+/// with zero bytes on an unhealthy edge IP and succeed on a fresh connection.
+const MAX_NETWORK_ATTEMPTS: usize = 5;
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const READ_TIMEOUT: Duration = Duration::from_secs(20);
+const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
+const RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
+
+/// Compiled-in fallback page for manual downloads; no command accepts a URL
+/// from the WebView.
+const RELEASES_URL: &str = "https://github.com/roy-tian/TFolio/releases/latest";
+
 /// The last known offer, in the shape `src/lib/update.ts` reads. A failed check
 /// keeps it; About reports that request's error without discarding an installer.
 #[derive(Clone, Default, Serialize)]
@@ -57,6 +69,8 @@ pub enum UpdateStatus {
     },
     Failed {
         version: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
     },
 }
 
@@ -256,17 +270,70 @@ pub async fn check_updates(app: AppHandle) -> Result<(), String> {
     state.run_check(check_release(&app, &state)).await
 }
 
+fn is_retryable_error(error: &tauri_plugin_updater::Error) -> bool {
+    matches!(
+        error,
+        tauri_plugin_updater::Error::Reqwest(_)
+            | tauri_plugin_updater::Error::Network(_)
+            // The updater plugin maps non-2xx manifest responses (e.g. 502/503) to this.
+            | tauri_plugin_updater::Error::ReleaseNotFound
+            | tauri_plugin_updater::Error::Io(_)
+    )
+}
+
+fn retry_delay(attempt: usize) -> Duration {
+    let shift = u32::try_from(attempt.saturating_sub(1)).unwrap_or(u32::MAX);
+    RETRY_BASE_DELAY.saturating_mul(1_u32.checked_shl(shift).unwrap_or(u32::MAX))
+}
+
+async fn pause(delay: Duration) {
+    let _ = tauri::async_runtime::spawn_blocking(move || std::thread::sleep(delay)).await;
+}
+
+async fn retry_network<T, E, Op, Fut, Retryable, Sleep, SleepFut>(
+    mut operation: Op,
+    is_retryable: Retryable,
+    mut sleep: Sleep,
+) -> Result<T, E>
+where
+    Op: FnMut(usize) -> Fut,
+    Fut: std::future::Future<Output = Result<T, E>>,
+    Retryable: Fn(&E) -> bool,
+    Sleep: FnMut(Duration) -> SleepFut,
+    SleepFut: std::future::Future<Output = ()>,
+{
+    let mut attempt = 1;
+    loop {
+        match operation(attempt).await {
+            Ok(value) => return Ok(value),
+            Err(error) if attempt < MAX_NETWORK_ATTEMPTS && is_retryable(&error) => {
+                sleep(retry_delay(attempt)).await;
+                attempt += 1;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
 async fn check_release(app: &AppHandle, state: &UpdateState) -> Result<(), String> {
     // Read before the request and judged after it: what an earlier run left
     // behind counts only if this run is offered the very same bytes.
     let saved = saved_package(app);
     let updater = app
         .updater_builder()
-        .timeout(Duration::from_secs(15))
+        .timeout(CHECK_TIMEOUT)
+        // Applied to both manifest checks and package downloads; `timeout`
+        // above applies only to `check`, so downloads still have no total cap
+        // while stalled connections still time out and retry.
+        .configure_client(|client| {
+            client
+                .connect_timeout(CONNECT_TIMEOUT)
+                .read_timeout(READ_TIMEOUT)
+        })
         .build()
         .map_err(|error| error.to_string())?;
 
-    let update = match updater.check().await {
+    let update = match retry_network(|_| updater.check(), is_retryable_error, pause).await {
         Ok(Some(update)) => update,
         // Nothing newer, so a saved installer is for a release this one is
         // already past — most likely the one it installed.
@@ -358,79 +425,120 @@ pub async fn download_update(app: AppHandle) -> Result<(), String> {
     };
 
     let version = update.version.clone();
-    state.publish(
-        &app,
-        UpdateStatus::Downloading {
-            version: version.clone(),
-            received: 0,
-            total: None,
+    let downloaded = retry_network(
+        |_| {
+            state.publish(
+                &app,
+                UpdateStatus::Downloading {
+                    version: version.clone(),
+                    received: 0,
+                    total: None,
+                },
+            );
+
+            let progress_app = app.clone();
+            let progress_version = version.clone();
+            let mut received = 0_u64;
+            // No step announced yet, so the first chunk always reports — that is the
+            // one carrying the length the bar needs to become determinate.
+            let mut announced = u64::MAX;
+
+            update.download(
+                move |chunk, total| {
+                    received = received.saturating_add(chunk as u64);
+                    let step = total
+                        .filter(|length| *length > 0)
+                        .map_or(received / UNMEASURED_STEP_BYTES, |length| {
+                            received.saturating_mul(100) / length
+                        });
+
+                    // A chunk is a few kilobytes; only a change the reader could
+                    // see is worth waking every window for.
+                    if step == announced {
+                        return;
+                    }
+
+                    announced = step;
+                    progress_app.state::<UpdateState>().publish(
+                        &progress_app,
+                        UpdateStatus::Downloading {
+                            version: progress_version.clone(),
+                            received,
+                            total,
+                        },
+                    );
+                },
+                || {},
+            )
         },
-    );
-
-    let progress_app = app.clone();
-    let progress_version = version.clone();
-    let mut received = 0_u64;
-    // No step announced yet, so the first chunk always reports — that is the
-    // one carrying the length the bar needs to become determinate.
-    let mut announced = u64::MAX;
-    let downloaded = update
-        .download(
-            move |chunk, total| {
-                received = received.saturating_add(chunk as u64);
-                let step = total
-                    .filter(|length| *length > 0)
-                    .map_or(received / UNMEASURED_STEP_BYTES, |length| {
-                        received.saturating_mul(100) / length
-                    });
-
-                // A chunk is a few kilobytes; only a change the reader could
-                // see is worth waking every window for.
-                if step == announced {
-                    return;
-                }
-
-                announced = step;
-                progress_app.state::<UpdateState>().publish(
-                    &progress_app,
-                    UpdateStatus::Downloading {
-                        version: progress_version.clone(),
-                        received,
-                        total,
-                    },
-                );
-            },
-            || {},
-        )
-        .await;
+        is_retryable_error,
+        pause,
+    )
+    .await;
 
     let bytes = match downloaded {
         Ok(bytes) => bytes,
         Err(error) => {
-            state.publish(&app, UpdateStatus::Failed { version });
-            return Err(error.to_string());
+            let message = error.to_string();
+            state.publish(
+                &app,
+                UpdateStatus::Failed {
+                    version,
+                    error: Some(message.clone()),
+                },
+            );
+            return Err(message);
         }
     };
 
     let package = Package {
         signature: update.signature.clone(),
     };
-    let stored = store_package(&app, &bytes, &package).is_ok()
-        && state
-            .package
-            .lock()
-            .map(|mut held| *held = Some(package))
-            .is_ok();
+    if let Err(error) = store_package(&app, &bytes, &package) {
+        state.publish(
+            &app,
+            UpdateStatus::Failed {
+                version,
+                error: Some(error.clone()),
+            },
+        );
+        return Err(error);
+    }
+
+    let held = state
+        .package
+        .lock()
+        .map(|mut held| *held = Some(package))
+        .is_ok();
 
     state.publish(
         &app,
-        if stored {
+        if held {
             UpdateStatus::Ready { version }
         } else {
-            UpdateStatus::Failed { version }
+            UpdateStatus::Failed {
+                version,
+                error: None,
+            }
         },
     );
 
     Ok(())
+}
+
+/// Opens the compiled-in releases page in the OS browser as a manual fallback
+/// when checking or downloading an update fails.
+#[tauri::command]
+pub async fn open_update_releases() -> Result<(), String> {
+    if cfg!(feature = "e2e") {
+        return Ok(());
+    }
+
+    tauri::async_runtime::spawn_blocking(|| {
+        tauri_plugin_opener::open_url(RELEASES_URL, None::<&str>).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("open releases task failed: {error}"))?
 }
 
 /// Installing restarts the process: everything every window has not written is
@@ -483,6 +591,7 @@ async fn install_verified_package(app: &AppHandle) -> Result<(), String> {
                 app,
                 UpdateStatus::Failed {
                     version: update.version.clone(),
+                    error: Some(error.clone()),
                 },
             );
 
@@ -597,9 +706,17 @@ mod tests {
         );
         assert_eq!(
             wire(UpdateStatus::Failed {
-                version: "1.2.3".into()
+                version: "1.2.3".into(),
+                error: None,
             }),
             serde_json::json!({"state": "failed", "version": "1.2.3"})
+        );
+        assert_eq!(
+            wire(UpdateStatus::Failed {
+                version: "1.2.3".into(),
+                error: Some("timed out".into()),
+            }),
+            serde_json::json!({"state": "failed", "version": "1.2.3", "error": "timed out"})
         );
     }
 
@@ -644,5 +761,102 @@ mod tests {
                 "state": "downloading", "version": "1.2.3", "received": 4096, "total": null
             })
         );
+    }
+
+    fn poll_ready<F: Future>(future: F) -> F::Output {
+        let mut context = Context::from_waker(Waker::noop());
+        match pin!(future).poll(&mut context) {
+            Poll::Ready(output) => output,
+            Poll::Pending => panic!("test future should resolve immediately"),
+        }
+    }
+
+    #[test]
+    fn network_retries_four_times_and_succeeds_on_the_fifth_attempt() {
+        let mut attempts = 0;
+        let mut delays = Vec::new();
+        let outcome = poll_ready(retry_network(
+            |attempt| {
+                attempts += 1;
+                std::future::ready(if attempt < MAX_NETWORK_ATTEMPTS {
+                    Err("timeout")
+                } else {
+                    Ok("ok")
+                })
+            },
+            |_| true,
+            |delay| {
+                delays.push(delay);
+                std::future::ready(())
+            },
+        ));
+
+        assert_eq!(outcome, Ok("ok"));
+        assert_eq!(attempts, 5);
+        assert_eq!(
+            delays,
+            vec![
+                Duration::from_secs(1),
+                Duration::from_secs(2),
+                Duration::from_secs(4),
+                Duration::from_secs(8),
+            ]
+        );
+    }
+
+    #[test]
+    fn network_stops_after_five_failed_attempts() {
+        let mut attempts = 0;
+        let mut delays = Vec::new();
+        let outcome: Result<(), usize> = poll_ready(retry_network(
+            |attempt| {
+                attempts += 1;
+                std::future::ready(Err(attempt))
+            },
+            |_| true,
+            |delay| {
+                delays.push(delay);
+                std::future::ready(())
+            },
+        ));
+
+        assert_eq!(outcome, Err(5));
+        assert_eq!(attempts, 5);
+        assert_eq!(delays.len(), 4);
+    }
+
+    #[test]
+    fn non_retryable_errors_stop_on_the_first_attempt() {
+        let mut attempts = 0;
+        let mut delays = Vec::new();
+        let outcome: Result<(), tauri_plugin_updater::Error> = poll_ready(retry_network(
+            |_| {
+                attempts += 1;
+                std::future::ready(Err(tauri_plugin_updater::Error::TargetNotFound(
+                    "windows-x86_64".into(),
+                )))
+            },
+            is_retryable_error,
+            |delay| {
+                delays.push(delay);
+                std::future::ready(())
+            },
+        ));
+
+        assert!(matches!(
+            outcome,
+            Err(tauri_plugin_updater::Error::TargetNotFound(_))
+        ));
+        assert_eq!(attempts, 1);
+        assert!(delays.is_empty());
+        assert!(is_retryable_error(
+            &tauri_plugin_updater::Error::ReleaseNotFound
+        ));
+        assert!(is_retryable_error(&tauri_plugin_updater::Error::Network(
+            "503".into()
+        )));
+        assert!(is_retryable_error(&tauri_plugin_updater::Error::Io(
+            std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out")
+        )));
     }
 }

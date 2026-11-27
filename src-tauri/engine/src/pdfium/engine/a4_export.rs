@@ -40,7 +40,7 @@ impl PdfiumEngine {
             // A new file cannot keep the signatures; drawn in first, if asked.
             let flatten = entry.output_flattens()?;
             let (padding, nodes) = entry.save_as_layout().unwrap_or_else(|| {
-                let own = collect_bookmark_siblings(entry.document.bookmarks().root());
+                let own = entry.effective_own_outline();
 
                 (
                     Vec::new(),

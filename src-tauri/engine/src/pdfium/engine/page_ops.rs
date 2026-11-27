@@ -506,6 +506,7 @@ impl PdfiumEngine {
         for stash_id in stash_ids {
             entry.stashes.remove(stash_id);
             entry.page_number_stashes.remove(stash_id);
+            entry.bookmark_stashes.remove(stash_id);
         }
 
         Ok(())

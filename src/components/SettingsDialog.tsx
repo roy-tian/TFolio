@@ -148,6 +148,7 @@ function ThemeMock({ preference }: { preference: ThemePreference }) {
 }
 
 type SettingsDialogProps = {
+  aboutCheckKey?: number
   onOpenChange: (open: boolean) => void
   onSectionChange: (section: SettingsSection) => void
   open: boolean
@@ -155,6 +156,7 @@ type SettingsDialogProps = {
 }
 
 export function SettingsDialog({
+  aboutCheckKey = 0,
   onOpenChange,
   onSectionChange,
   open,
@@ -378,7 +380,7 @@ export function SettingsDialog({
               </p>
               <p className="mt-auto pt-6 text-xs text-muted-foreground">
                 {t("about.version", { version: __APP_VERSION__ })}{" "}
-                {open && section === "about" ? <AboutUpdate /> : null}
+                {open && section === "about" ? <AboutUpdate key={aboutCheckKey} /> : null}
               </p>
               <p className="pt-2 text-xs text-muted-foreground">
                 {t("about.copyright")}

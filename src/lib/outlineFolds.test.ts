@@ -6,6 +6,7 @@ import {
   fileFoldKey,
   foldableBookmarks,
   foldAllOf,
+  foldsAfterBookmarkDelete,
   NO_FOLDS,
   toggledFold,
 } from "./outlineFolds"
@@ -176,5 +177,38 @@ describe("activeFileOutlineTarget", () => {
       kind: "bookmark",
       key: "section-1-1",
     })
+  })
+})
+
+describe("foldsAfterBookmarkDelete", () => {
+  test("drops the deleted bookmark and its descendants and shifts later siblings down", () => {
+    const folds = new Set([
+      "root-0",
+      "root-1",
+      "root-1-0",
+      "root-2",
+      "root-2-0",
+      "root-10",
+      "file-1",
+    ])
+
+    expect([...foldsAfterBookmarkDelete(folds, "root", 1)].sort()).toEqual([
+      "file-1",
+      "root-0",
+      "root-1",
+      "root-1-0",
+      "root-9",
+    ])
+  })
+
+  test("shifts nested siblings without touching their parent", () => {
+    const folds = new Set(["root-0", "root-0-0", "root-0-1", "root-0-2-0", "root-1"])
+
+    expect([...foldsAfterBookmarkDelete(folds, "root-0", 1)].sort()).toEqual([
+      "root-0",
+      "root-0-0",
+      "root-0-1-0",
+      "root-1",
+    ])
   })
 })

@@ -37,7 +37,7 @@ struct Section {
 /// A file's bookmark, aimed at a page by its stable id, so it follows that
 /// page wherever a reorder takes it; a page deleted leaves it pointing nowhere.
 #[derive(Clone)]
-struct SectionBookmark {
+pub(super) struct SectionBookmark {
     title: String,
     page_id: Option<u64>,
     children: Vec<SectionBookmark>,
@@ -69,7 +69,7 @@ pub struct PdfSection {
 
 /// A file's bookmarks as a source document numbers them, aimed at the ids its
 /// pages took in this one.
-fn bookmarks_from(items: &[PdfOutlineItem], page_ids: &[u64]) -> Vec<SectionBookmark> {
+pub(super) fn bookmarks_from(items: &[PdfOutlineItem], page_ids: &[u64]) -> Vec<SectionBookmark> {
     items
         .iter()
         .map(|item| SectionBookmark {
@@ -272,6 +272,66 @@ impl SectionBook {
             .ok_or_else(|| format!("file {section_id} is not one of this document's"))
     }
 
+    pub(super) fn section_outline_mut(
+        &mut self,
+        section_id: u64,
+    ) -> Result<&mut Vec<SectionBookmark>, String> {
+        self.sections
+            .iter_mut()
+            .find(|section| section.id == section_id)
+            .map(|section| &mut section.outline)
+            .ok_or_else(|| format!("file {section_id} is not one of this document's"))
+    }
+
+    pub(super) fn rename_bookmark(
+        &mut self,
+        section_id: u64,
+        path: &[usize],
+        title: String,
+    ) -> Result<(), String> {
+        let outline = self.section_outline_mut(section_id)?;
+        let item = bookmark_mut_at(outline, path)?;
+        item.title = title;
+        Ok(())
+    }
+
+    pub(super) fn delete_bookmark(
+        &mut self,
+        section_id: u64,
+        path: &[usize],
+    ) -> Result<SectionBookmark, String> {
+        let outline = self.section_outline_mut(section_id)?;
+        let (parent, index) = bookmark_parent_mut(outline, path)?;
+        Ok(parent.remove(index))
+    }
+
+    pub(super) fn restore_bookmark(
+        &mut self,
+        section_id: u64,
+        path: &[usize],
+        item: SectionBookmark,
+    ) -> Result<(), String> {
+        let outline = self.section_outline_mut(section_id)?;
+        let (parent, index) = bookmark_insert_parent_mut(outline, path)?;
+        parent.insert(index, item);
+        Ok(())
+    }
+
+    pub(super) fn replace_outline(
+        &mut self,
+        section_id: u64,
+        items: &[PdfOutlineItem],
+        page_ids: &[u64],
+    ) {
+        if let Some(section) = self
+            .sections
+            .iter_mut()
+            .find(|section| section.id == section_id)
+        {
+            section.outline = bookmarks_from(items, page_ids);
+        }
+    }
+
     /// The files with a page still in the document, by where each first stands.
     fn shown(&self, page_ids: &[u64]) -> Vec<&Section> {
         let mut seen = Vec::new();
@@ -393,6 +453,58 @@ fn positions(page_ids: &[u64]) -> HashMap<u64, usize> {
         .enumerate()
         .map(|(index, id)| (*id, index))
         .collect()
+}
+
+fn bookmark_parent_mut<'a>(
+    mut items: &'a mut Vec<SectionBookmark>,
+    path: &[usize],
+) -> Result<(&'a mut Vec<SectionBookmark>, usize), String> {
+    let Some((&last, ancestors)) = path.split_last() else {
+        return Err("bookmark path cannot be empty".into());
+    };
+
+    for &index in ancestors {
+        items = &mut items
+            .get_mut(index)
+            .ok_or_else(|| "bookmark does not exist".to_string())?
+            .children;
+    }
+
+    if last >= items.len() {
+        return Err("bookmark does not exist".into());
+    }
+
+    Ok((items, last))
+}
+
+fn bookmark_mut_at<'a>(
+    items: &'a mut Vec<SectionBookmark>,
+    path: &[usize],
+) -> Result<&'a mut SectionBookmark, String> {
+    let (parent, index) = bookmark_parent_mut(items, path)?;
+    Ok(&mut parent[index])
+}
+
+fn bookmark_insert_parent_mut<'a>(
+    mut items: &'a mut Vec<SectionBookmark>,
+    path: &[usize],
+) -> Result<(&'a mut Vec<SectionBookmark>, usize), String> {
+    let Some((&last, ancestors)) = path.split_last() else {
+        return Err("bookmark path cannot be empty".into());
+    };
+
+    for &index in ancestors {
+        items = &mut items
+            .get_mut(index)
+            .ok_or_else(|| "the parent bookmark no longer exists".to_string())?
+            .children;
+    }
+
+    if last > items.len() {
+        return Err("the bookmark position is out of range".into());
+    }
+
+    Ok((items, last))
 }
 
 impl PdfiumEngine {

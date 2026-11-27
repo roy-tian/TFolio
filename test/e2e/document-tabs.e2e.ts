@@ -21,7 +21,7 @@ import {
   dropZoneButton,
   emitDrag,
   minimalPdf,
-  openFileButton,
+  newDocumentButton,
   openPathViaDialog,
   openPdfFromDisk,
   recentFilesStore,
@@ -53,9 +53,9 @@ function waitForPageCount(count: number, timeoutMsg: string) {
   )
 }
 
-/** The strip's open button stays disabled while an open is still running. */
+/** The strip's new button stays disabled while an open is still running. */
 async function openAgain(filePath: string) {
-  await openFileButton().waitForEnabled()
+  await newDocumentButton().waitForEnabled()
   await openPathViaDialog(filePath)
 }
 
@@ -354,11 +354,33 @@ async function resetWorkspace() {
   // The view mode persists, so leave it unset to start from the single view.
   await seedSettings({ ui: { language: "en" } })
   await refreshApp()
-  await openFileButton().waitForExist({ timeout: 30_000 })
+  await newDocumentButton().waitForExist({ timeout: 30_000 })
 }
 
 describe("independent document tabs", () => {
   beforeEach(resetWorkspace)
+
+  it("creates a blank A4 PDF from the tab strip button", async () => {
+    await expect(newDocumentButton()).toHaveAttribute("aria-label", "New PDF")
+    await newDocumentButton().click()
+
+    await tabButton("Untitled.pdf").waitForExist({ timeout: 15_000 })
+    await expect(tabButton("Untitled.pdf")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+    await waitForPageCount(1, "the blank PDF never showed its single page")
+    const page = $("[data-active='true'] [data-page-number='1']")
+    await page.waitForDisplayed()
+
+    const ratio = await browser.execute(() => {
+      const rect = document
+        .querySelector("[data-active='true'] [data-page-number='1']")!
+        .getBoundingClientRect()
+      return rect.width / rect.height
+    })
+    expect(Math.abs(ratio - 595 / 842)).toBeLessThan(0.03)
+  })
 
   it("closes the only clean document back to the home tab", async () => {
     await openPdfFromDisk("only.pdf", minimalPdf())

@@ -13,8 +13,10 @@ import {
   refreshApp,
   renderedPage,
   seedSettings,
+  switchSidebarPanel,
   textPdf,
 } from "./helpers"
+import { calibratePointer, pointer } from "./nativePointer"
 
 // The zoom listener is bound natively and non-passively, so the wheel goes out
 // as a real event; hidden tabs carry a 0x0 `<main>` too, so scope to the active one.
@@ -220,11 +222,15 @@ describe("TFolio PDF viewer", () => {
     await expect(pageInput).toHaveValue("1")
 
     // Either panel opens for any document: one with no bookmarks says so.
-    await $(`${activeSidebar} button[aria-label='Outline']`).click()
+    const switcher = $(`${activeSidebar} [data-slot='sidebar-panel-switch']`)
+    await expect(switcher).toHaveText("Thumbnails")
+    await switchSidebarPanel("bookmarks")
+    await expect(switcher).toHaveText("Outline")
     await expect($(`${activeSidebar} nav[aria-label='Bookmarks']`)).toHaveText(
       "This document has no bookmarks",
     )
-    await $(`${activeSidebar} button[aria-label='Thumbnails']`).click()
+    await switchSidebarPanel("thumbnails")
+    await expect(switcher).toHaveText("Thumbnails")
     await $(`${activeSidebar} [data-slot='sidebar-thumbnails']`).waitForExist()
 
     await clickAppMenuItem("settings")
@@ -320,7 +326,7 @@ describe("TFolio PDF viewer", () => {
     const bookmarks = $(`${activeSidebar} nav[aria-label='Bookmarks']`)
     const pageInput = $("input[aria-label='Page number']")
 
-    await $(`${activeSidebar} button[aria-label='Outline']`).click()
+    await switchSidebarPanel("bookmarks")
     await expect(bookmarks).toHaveText("Second half")
     await bookmarks.$("button").click()
     await expect(pageInput).toHaveValue("2")
@@ -332,7 +338,7 @@ describe("TFolio PDF viewer", () => {
 
     // The other panel previews every page and follows the reader's — which
     // the trip through the views may have moved, both pages being in sight.
-    await $(`${activeSidebar} button[aria-label='Thumbnails']`).click()
+    await switchSidebarPanel("thumbnails")
     await expect(bookmarks).not.toBeExisting()
     const preview = (page: string) =>
       $(`${activeSidebar} button[aria-label='Go to page ${page}']`)
@@ -356,7 +362,7 @@ describe("TFolio PDF viewer", () => {
     const chapter = () => bookmarks.$("button=Chapter one")
     const arrow = bookmarks.$("[data-slot='bookmark-fold']")
 
-    await $(`${activeSidebar} button[aria-label='Outline']`).click()
+    await switchSidebarPanel("bookmarks")
     await expect(chapter()).toBeDisplayed()
     await expect(foldAll).toHaveAttribute("aria-label", "Collapse all bookmarks")
     // Named apart from the bookmark beside it, which goes to its page.
@@ -374,10 +380,89 @@ describe("TFolio PDF viewer", () => {
 
     // Folds are the tab's, kept while the sidebar shows its pages.
     await foldAll.click()
-    await $(`${activeSidebar} button[aria-label='Thumbnails']`).click()
-    await $(`${activeSidebar} button[aria-label='Outline']`).click()
+    await switchSidebarPanel("thumbnails")
+    await switchSidebarPanel("bookmarks")
     await expect(bookmarks.$("button=Part two")).toBeDisplayed()
     await expect(chapter()).not.toBeExisting()
+  })
+
+  it("renames and deletes bookmarks on hover, and persists or undoes them", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+    await openPdfFromDisk("nested-edit.pdf", nestedOutlinePdf())
+    await $("[data-page-number='1']").waitForDisplayed()
+
+    const bookmarks = $(`${activeSidebar} nav[aria-label='Bookmarks']`)
+    await switchSidebarPanel("bookmarks")
+    await bookmarks.$("button=Part one").waitForDisplayed()
+
+    const rowTools = `${activeSidebar} nav[aria-label='Bookmarks'] [data-slot='bookmark-tools']`
+    const toolsOpacity = (index: number) =>
+      browser.execute(
+        (css: string, at: number) => {
+          const el = document.querySelectorAll<HTMLElement>(css)[at]
+          return el ? getComputedStyle(el).opacity : null
+        },
+        rowTools,
+        index,
+      )
+
+    // Hidden at rest.
+    expect(await toolsOpacity(0)).toBe("0")
+
+    // Visible on real pointer hover, and hidden again once the pointer leaves.
+    const origin = await calibratePointer()
+    const rowCenter = await browser.execute((css: string) => {
+      const box = document.querySelector<HTMLElement>(css)!.getBoundingClientRect()
+      return { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) }
+    }, `${activeSidebar} nav[aria-label='Bookmarks'] [data-slot='bookmark-row']`)
+    try {
+      pointer({ x: origin.x + rowCenter.x, y: origin.y + rowCenter.y })
+      await browser.waitUntil(async () => (await toolsOpacity(0)) === "1", {
+        timeoutMsg: "hovering bookmark row never revealed row tools",
+      })
+    } finally {
+      pointer({ x: origin.x + 10, y: origin.y + 10 })
+    }
+    await browser.waitUntil(async () => (await toolsOpacity(0)) === "0", {
+      timeoutMsg: "leaving bookmark row never hid row tools",
+    })
+
+    // Visible on keyboard focus-visible of the tool button as well.
+    await browser.execute((css: string) => {
+      document.querySelectorAll<HTMLElement>(css)[0]!.focus()
+    }, `${activeSidebar} nav[aria-label='Bookmarks'] [data-slot='bookmark-rename']`)
+    await browser.keys(["Shift", "Tab"])
+    await browser.keys("Tab")
+    await browser.waitUntil(async () => (await toolsOpacity(0)) === "1", {
+      timeoutMsg: "focus-visible on bookmark rename button never revealed row tools",
+    })
+
+    // Rename "Part one" via the pencil button.
+    await browser.execute((css: string) => {
+      const btn = document.querySelectorAll<HTMLElement>(css)[0]!
+      btn.click()
+    }, `${activeSidebar} nav[aria-label='Bookmarks'] [data-slot='bookmark-rename']`)
+    const input = $(`${activeSidebar} [data-slot='bookmark-title-input']`)
+    await input.waitForDisplayed()
+    await expect(input).toBeFocused()
+    await input.setValue("Section one")
+    await browser.keys("Enter")
+    await bookmarks.$("button=Section one").waitForDisplayed()
+
+    // Delete "Part two" via the delete button, then undo and redo.
+    await browser.execute((css: string) => {
+      const btns = document.querySelectorAll<HTMLElement>(css)
+      btns[btns.length - 1]!.click()
+    }, `${activeSidebar} nav[aria-label='Bookmarks'] [data-slot='bookmark-delete']`)
+    await expect(bookmarks.$("button=Part two")).not.toBeExisting()
+
+    await browser.keys(["Control", "z"])
+    await bookmarks.$("button=Part two").waitForDisplayed()
+
+    // Undo the rename too, then verify clean state.
+    await browser.keys(["Control", "z"])
+    await bookmarks.$("button=Part one").waitForDisplayed()
   })
 
   it("turns whole pages and spreads with Page Up and Page Down at any zoom", async () => {

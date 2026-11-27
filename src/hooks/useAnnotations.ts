@@ -3,6 +3,7 @@ import { Channel, invoke } from "@tauri-apps/api/core"
 
 import {
   canRedo,
+  canRenameBookmark,
   canUndo,
   commandPageChange,
   commandPages,
@@ -16,6 +17,7 @@ import {
   nextRedoCommand,
   nextUndoCommand,
   pageNumbersConfig as currentPageNumbersConfig,
+  planDeleteBookmark,
   planDeletePages,
   planDuplicatePages,
   planInsertPages,
@@ -23,6 +25,7 @@ import {
   planInsertBlankPage,
   planFileOptions,
   planInsertFiles,
+  planRenameBookmark,
   planRenameSection,
   planPageNumbersChange,
   planReorderPages,
@@ -329,6 +332,31 @@ async function applyCommand(
         commandPageChange(command, false),
       )
       return []
+    case "renameBookmark":
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("rename_pdf_bookmark", {
+          documentId,
+          exact: false,
+          path: command.path,
+          sectionId: command.sectionId ?? null,
+          title: command.title,
+        }),
+        commandPageChange(command, false),
+      )
+      return []
+    case "deleteBookmark":
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("delete_pdf_bookmark", {
+          documentId,
+          path: command.path,
+          sectionId: command.sectionId ?? null,
+          stashId: command.stashId,
+        }),
+        commandPageChange(command, false),
+      )
+      return []
     case "fileOptions":
       onStructureChange(
         documentId,
@@ -503,6 +531,29 @@ async function retractCommand(
         commandPageChange(command, true),
       )
       return []
+    case "renameBookmark":
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("rename_pdf_bookmark", {
+          documentId,
+          exact: true,
+          path: command.path,
+          sectionId: command.sectionId ?? null,
+          title: command.previous,
+        }),
+        commandPageChange(command, true),
+      )
+      return []
+    case "deleteBookmark":
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("restore_pdf_bookmark", {
+          documentId,
+          stashId: command.stashId,
+        }),
+        commandPageChange(command, true),
+      )
+      return []
     case "fileOptions":
       onStructureChange(
         documentId,
@@ -563,6 +614,9 @@ export function useAnnotations({
   // Page-moving edits in flight: a page edit must not plan against positions one
   // is about to change, and a mark made meanwhile would land on the wrong page.
   const structurePendingRef = useRef(0)
+  // Bookmark paths reflect the outline as last rendered: refuse a second change
+  // while one or any queued edit that can reorder bookmarks is in flight.
+  const bookmarkPendingRef = useRef(0)
   // One export at a time on this document's queue: prevents Save As and sibling
   // exports from queuing a second native save dialog behind an in-flight one,
   // while leaving other tabs free to open files during a long write.
@@ -1171,6 +1225,64 @@ export function useAnnotations({
     (sectionId: number, title: string, previous: string) =>
       commitFileChange((current) => planRenameSection(current, sectionId, title, previous)),
     [commitFileChange],
+  )
+
+  const commitBookmarkChange = useCallback(
+    async (
+      plan: (
+        current: AnnotationHistory,
+      ) => { command: AnnotationCommand; history: AnnotationHistory } | null,
+    ) => {
+      if (
+        bookmarkPendingRef.current > 0 ||
+        structurePendingRef.current > 0 ||
+        pendingRef.current > 0
+      ) {
+        return false
+      }
+
+      bookmarkPendingRef.current += 1
+      try {
+        const ready = signedChangeReady("edit")
+
+        if (ready !== true && !(await ready)) {
+          return false
+        }
+
+        if (structurePendingRef.current > 0 || pendingRef.current > 0) {
+          return false
+        }
+
+        return await commitFileChange(plan)
+      } finally {
+        bookmarkPendingRef.current -= 1
+      }
+    },
+    [commitFileChange, signedChangeReady],
+  )
+
+  const renameBookmark = useCallback(
+    async (path: number[], title: string, previous: string, sectionId?: number) => {
+      if (!canRenameBookmark(path, title, previous)) {
+        return false
+      }
+
+      return commitBookmarkChange((current) =>
+        planRenameBookmark(current, path, title, previous, sectionId),
+      )
+    },
+    [commitBookmarkChange],
+  )
+
+  const deleteBookmark = useCallback(
+    async (path: number[], sectionId?: number) => {
+      if (path.length === 0) {
+        return false
+      }
+
+      return commitBookmarkChange((current) => planDeleteBookmark(current, path, sectionId))
+    },
+    [commitBookmarkChange],
   )
 
   /** `current` is read when the change takes its turn, so a toggle made while
@@ -1879,6 +1991,7 @@ export function useAnnotations({
       canUndo: canUndo(history) && !isBusy,
       cancelOperation,
       commit: commitCommand,
+      deleteBookmark,
       deletePages,
       duplicatePages,
       eraseAt,
@@ -1902,6 +2015,7 @@ export function useAnnotations({
       nextUndo: nextUndoCommand(history),
       pageNumbersConfig: currentPageNumbersConfig(history),
       redo: redoCommand,
+      renameBookmark,
       renameSection,
       reorderPages,
       renderEpochs,
@@ -1920,6 +2034,7 @@ export function useAnnotations({
     [
       cancelOperation,
       commitCommand,
+      deleteBookmark,
       deletePages,
       duplicatePages,
       eraseAt,
@@ -1939,6 +2054,7 @@ export function useAnnotations({
       isDirtyNow,
       isStructureBusyNow,
       redoCommand,
+      renameBookmark,
       renameSection,
       renderEpochs,
       reorderPages,

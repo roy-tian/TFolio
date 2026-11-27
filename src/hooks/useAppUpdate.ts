@@ -4,6 +4,7 @@ import { updateNeedsConfirmation, watchUnsavedWork } from "@/lib/unsavedWork"
 
 import {
   downloadUpdate,
+  formatUpdateError,
   installUpdate,
   readUpdateStatus,
   shouldShowUpdate,
@@ -15,6 +16,7 @@ export type AppUpdate = {
   /** Set when an install was asked for and the platform would not take it. A
       failure of the press rather than of the update, which is still here. */
   installFailed: boolean
+  installError: string | null
   dismiss: () => void
   download: () => void
   install: () => void
@@ -37,6 +39,7 @@ export function useAppUpdate(hasUnsavedWorkNow: () => boolean): AppUpdate {
     AppUpdateStatus["state"] | null
   >(null)
   const [installFailed, setInstallFailed] = useState(false)
+  const [installError, setInstallError] = useState<string | null>(null)
   const [confirmingInstall, setConfirmingInstall] = useState(false)
   const checkingInstall = useRef(false)
 
@@ -82,16 +85,24 @@ export function useAppUpdate(hasUnsavedWorkNow: () => boolean): AppUpdate {
 
   const download = useCallback(() => {
     setInstallFailed(false)
-    // A download that fails says so as a status of its own, which every window
-    // hears; there is nothing left for the rejection here to add.
-    void downloadUpdate().catch(() => undefined)
+    setInstallError(null)
+    // Every window hears the failed status with its message; keep the full
+    // rejection in the console for diagnosis.
+    void downloadUpdate().catch((error: unknown) => {
+      console.warn("[updater] download failed:", error)
+    })
   }, [])
 
   const install = useCallback(() => {
     setInstallFailed(false)
+    setInstallError(null)
     // Only a refusal ever returns from this one: an install that took restarts
     // the app instead of answering.
-    void installUpdate().catch(() => setInstallFailed(true))
+    void installUpdate().catch((error: unknown) => {
+      console.warn("[updater] install failed:", error)
+      setInstallFailed(true)
+      setInstallError(formatUpdateError(error))
+    })
   }, [])
 
   const requestInstall = useCallback(() => {
@@ -118,6 +129,7 @@ export function useAppUpdate(hasUnsavedWorkNow: () => boolean): AppUpdate {
     confirmingInstall,
     setConfirmingInstall,
     installFailed,
+    installError,
     status,
     visible: shouldShowUpdate(status, dismissedState),
   }

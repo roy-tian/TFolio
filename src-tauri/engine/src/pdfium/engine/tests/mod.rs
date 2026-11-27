@@ -18,6 +18,7 @@ mod support;
 mod a4_export;
 mod annotations;
 mod archive_export;
+mod bookmarks;
 mod compress;
 mod cross_document_pages;
 mod documents;

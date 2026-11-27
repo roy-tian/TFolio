@@ -3,12 +3,14 @@ import { describe, expect, it } from "bun:test"
 import {
   commit,
   emptyHistory,
+  planDeleteBookmark,
   planDeletePages,
   planDuplicatePages,
   planEraseAnnotation,
   planInsertBlankPage,
   planInsertFiles,
   planPageNumbersChange,
+  planRenameBookmark,
   planRenameSection,
   planReorderPages,
   planRotatePages,
@@ -200,6 +202,23 @@ describe("isDirty, judged by what a save would write", () => {
     expect(
       isDirty(after(renamed, (history) => planRenameSection(history, 1, "Draft", "Report"))),
     ).toBe(false)
+  })
+
+  it("reports a bookmark renamed and named back clean, and a deleted bookmark dirty until undone", () => {
+    const renamed = after(emptyHistory, (history) =>
+      planRenameBookmark(history, [0, 1], "Intro", "Chapter 1"),
+    )
+
+    expect(isDirty(renamed)).toBe(true)
+    expect(
+      isDirty(
+        after(renamed, (history) => planRenameBookmark(history, [0, 1], "Chapter 1", "Intro")),
+      ),
+    ).toBe(false)
+
+    const deleted = after(emptyHistory, (history) => planDeleteBookmark(history, [0]))
+    expect(isDirty(deleted)).toBe(true)
+    expect(isDirty(after(deleted, back))).toBe(false)
   })
 
   // Runs, padding and file bookmarks are the engine's, so a document that took

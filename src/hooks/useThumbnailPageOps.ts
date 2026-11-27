@@ -3,7 +3,7 @@ import type { useAnnotations } from "@/hooks/useAnnotations"
 import type { usePageClipboard } from "@/hooks/usePageClipboard"
 import type { useThumbnailSelection } from "@/hooks/useThumbnailSelection"
 import type { CarriedPages } from "@/lib/pageCarry"
-import type { PdfDocumentInfo } from "@/lib/pdf"
+import type { PdfDocumentInfo, PdfPageInfo } from "@/lib/pdf"
 import { pagesToRotate } from "@/lib/pageRotation"
 import { workspaceOwner } from "@/lib/notices"
 import { heldPages, movePagesOut, pageSourceOf, pagesStanding, pastePlan } from "@/lib/pageClipboard"
@@ -91,10 +91,29 @@ export function useThumbnailPageOps({
 
   /**
    * Rotate in a preview's menu, where turning a page edits the document —
-   * undone and saved like any other — taking the selection, or all of it.
+   * undone and saved like any other — taking explicit snapshot pages from a
+   * context menu, or else the selection (or all pages when empty).
    */
-  const rotateThumbnailPages = (degrees: 90 | 270) => {
+  const rotateThumbnailPages = (
+    degrees: 90 | 270,
+    pages?: Iterable<number>,
+    expectedPages?: readonly PdfPageInfo[],
+  ) => {
     if (!pdfDocument || editingBusy()) {
+      return
+    }
+
+    if (expectedPages && expectedPages !== pdfDocument.pages) {
+      return
+    }
+
+    if (pages) {
+      const uniquePages = [...new Set(pages)].sort((left, right) => left - right)
+      if (uniquePages.length === 0) {
+        return
+      }
+
+      void annotations.rotatePages(uniquePages, degrees)
       return
     }
 

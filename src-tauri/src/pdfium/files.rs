@@ -220,6 +220,18 @@ pub async fn set_pdf_file_options(
         .map_err(|error| format!("PDFium options task failed: {error}"))?
 }
 
+fn ensure_document_owner(
+    owners: &DocumentOwners,
+    document_id: u64,
+    window: &WebviewWindow,
+) -> Result<(), String> {
+    if !owners.owns(document_id, window.label()) {
+        return Err("this window does not hold that document".into());
+    }
+
+    Ok(())
+}
+
 /// The name a file of the document goes by, and its bookmark in a Save As.
 #[tauri::command]
 pub async fn rename_pdf_section(
@@ -227,7 +239,10 @@ pub async fn rename_pdf_section(
     section_id: u64,
     title: String,
     state: State<'_, PdfiumState>,
+    owners: State<'_, DocumentOwners>,
+    window: WebviewWindow,
 ) -> Result<PdfStructureUpdate, String> {
+    ensure_document_owner(&owners, document_id, &window)?;
     let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -235,4 +250,71 @@ pub async fn rename_pdf_section(
     })
     .await
     .map_err(|error| format!("PDFium rename task failed: {error}"))?
+}
+
+/// Gives a bookmark in the document (or in one of its sections) a new title.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn rename_pdf_bookmark(
+    document_id: u64,
+    section_id: Option<u64>,
+    path: Vec<usize>,
+    title: String,
+    exact: Option<bool>,
+    state: State<'_, PdfiumState>,
+    owners: State<'_, DocumentOwners>,
+    window: WebviewWindow,
+) -> Result<PdfStructureUpdate, String> {
+    ensure_document_owner(&owners, document_id, &window)?;
+    let engine = Arc::clone(&state.engine);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        engine.rename_bookmark(
+            document_id,
+            section_id,
+            &path,
+            &title,
+            exact.unwrap_or(false),
+        )
+    })
+    .await
+    .map_err(|error| format!("PDFium bookmark rename task failed: {error}"))?
+}
+
+/// Deletes a bookmark (and its descendants), stashing them under `stash_id` for undo.
+#[tauri::command]
+pub async fn delete_pdf_bookmark(
+    document_id: u64,
+    section_id: Option<u64>,
+    path: Vec<usize>,
+    stash_id: u64,
+    state: State<'_, PdfiumState>,
+    owners: State<'_, DocumentOwners>,
+    window: WebviewWindow,
+) -> Result<PdfStructureUpdate, String> {
+    ensure_document_owner(&owners, document_id, &window)?;
+    let engine = Arc::clone(&state.engine);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        engine.delete_bookmark(document_id, section_id, &path, stash_id)
+    })
+    .await
+    .map_err(|error| format!("PDFium bookmark deletion task failed: {error}"))?
+}
+
+/// Restores a previously deleted bookmark subtree from `stash_id`.
+#[tauri::command]
+pub async fn restore_pdf_bookmark(
+    document_id: u64,
+    stash_id: u64,
+    state: State<'_, PdfiumState>,
+    owners: State<'_, DocumentOwners>,
+    window: WebviewWindow,
+) -> Result<PdfStructureUpdate, String> {
+    ensure_document_owner(&owners, document_id, &window)?;
+    let engine = Arc::clone(&state.engine);
+
+    tauri::async_runtime::spawn_blocking(move || engine.restore_bookmark(document_id, stash_id))
+        .await
+        .map_err(|error| format!("PDFium bookmark restore task failed: {error}"))?
 }

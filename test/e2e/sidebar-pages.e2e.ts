@@ -10,6 +10,7 @@ import {
   seedSettings,
   settingsHold,
   sidebarPageAction,
+  tooltipOn,
 } from "./helpers"
 
 const session = "[data-document-session][data-active='true']"
@@ -413,18 +414,23 @@ describe("TFolio sidebar pages", () => {
         return { pages: window.innerWidth - sidebar, sidebar }
       }, activeSidebar)
 
+    expect(await tooltipOn(handle)).toBe("Double-click to expand sidebar (1:1 with main view)")
+
     await dragEdge(60)
     await browser.waitUntil(async () => (await sidebarWidth()) > 300)
+    expect(await tooltipOn(handle)).toBe("Double-click to restore sidebar (1-column thumbnails)")
     await doubleClickEdge()
     await browser.waitUntil(async () => (await sidebarWidth()) === 256, {
       timeoutMsg: "the sidebar never went back to its narrowest",
     })
+    expect(await tooltipOn(handle)).toBe("Double-click to expand sidebar (1:1 with main view)")
 
     // As wide as the pages beside it, where the window leaves them their room.
     await doubleClickEdge()
     await browser.waitUntil(async () => (await sidebarWidth()) > 256)
     const { pages, sidebar } = await halves()
     expect(Math.abs(pages - sidebar)).toBeLessThanOrEqual(1)
+    expect(await tooltipOn(handle)).toBe("Double-click to restore sidebar (1-column thumbnails)")
 
     await doubleClickEdge()
     await browser.waitUntil(async () => (await sidebarWidth()) === 256)
