@@ -571,6 +571,8 @@ const zhCN = {
     show: "显示侧栏",
     hide: "隐藏侧栏",
     resize: "调整侧栏宽度",
+    resizeExpand: "双击拓展侧边栏（侧边栏与主界面宽度1:1）",
+    resizeRestore: "双击恢复侧边栏（1列缩略图）",
     addFiles: "添加文件…",
     dropFiles: "松开以添加到当前文档",
     dropFilesAtEnd: "松开以添加到当前文档末尾",

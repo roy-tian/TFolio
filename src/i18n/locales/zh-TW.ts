@@ -588,6 +588,8 @@ const zhTW = {
     show: "顯示側欄",
     hide: "隱藏側欄",
     resize: "調整側欄寬度",
+    resizeExpand: "連按兩下展開側欄（側欄與主畫面寬度 1:1）",
+    resizeRestore: "連按兩下恢復側欄（1 欄縮圖）",
     addFiles: "加入檔案…",
     dropFiles: "放開以加入目前文件",
     dropFilesAtEnd: "放開以加到目前文件結尾",

@@ -593,6 +593,8 @@ const es = {
     show: "Mostrar barra lateral",
     hide: "Ocultar barra lateral",
     resize: "Cambiar el ancho de la barra lateral",
+    resizeExpand: "Doble clic para ampliar la barra lateral (ancho 1:1)",
+    resizeRestore: "Doble clic para restaurar la barra lateral (1 columna de miniaturas)",
     addFiles: "Añadir archivos…",
     dropFiles: "Suelta para añadirlos a este documento",
     dropFilesAtEnd: "Suelta para añadirlos al final de este documento",

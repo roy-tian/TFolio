@@ -8,6 +8,7 @@ import {
   isSidebarPanel,
   SIDEBAR_DOCK_MIN_WIDTH,
   SIDEBAR_MIN_WIDTH,
+  sidebarDoubleClick,
   sidebarMode,
   sidebarReservedWidth,
   sidebarWidthOf,
@@ -73,6 +74,46 @@ describe("sidebar width", () => {
       SIDEBAR_MIN_WIDTH,
     )
     expect(clampSidebarWidth(900, 700, sidebarReservedWidth(false))).toBe(636)
+  })
+})
+
+describe("sidebarDoubleClick", () => {
+  test("expands a docked sidebar from its opening width toward half the window when room allows", () => {
+    const reserved = sidebarReservedWidth(true)
+
+    expect(sidebarDoubleClick("docked", SIDEBAR_MIN_WIDTH, 1280, reserved)).toEqual({
+      action: "expand",
+      width: 640,
+    })
+    expect(sidebarDoubleClick("docked", SIDEBAR_MIN_WIDTH, 1000, reserved)).toEqual({
+      action: "expand",
+      width: 360,
+    })
+    expect(
+      sidebarDoubleClick("docked", SIDEBAR_MIN_WIDTH, SIDEBAR_DOCK_MIN_WIDTH, reserved),
+    ).toBeNull()
+  })
+
+  test("restores any widened sidebar back to its opening width", () => {
+    expect(sidebarDoubleClick("docked", 300, 1280, sidebarReservedWidth(true))).toEqual({
+      action: "restore",
+      width: null,
+    })
+    expect(sidebarDoubleClick("docked", 640, 1280, sidebarReservedWidth(true))).toEqual({
+      action: "restore",
+      width: null,
+    })
+    expect(sidebarDoubleClick("overlay", 400, 800, sidebarReservedWidth(false))).toEqual({
+      action: "restore",
+      width: null,
+    })
+  })
+
+  test("does nothing when hidden or at opening width in overlay mode", () => {
+    expect(
+      sidebarDoubleClick("overlay", SIDEBAR_MIN_WIDTH, 800, sidebarReservedWidth(false)),
+    ).toBeNull()
+    expect(sidebarDoubleClick("hidden", 400, 1280, sidebarReservedWidth(true))).toBeNull()
   })
 })
 

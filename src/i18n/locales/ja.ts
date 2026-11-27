@@ -597,6 +597,8 @@ const ja = {
     show: "サイドバーを表示",
     hide: "サイドバーを非表示",
     resize: "サイドバーの幅を変更",
+    resizeExpand: "ダブルクリックでサイドバーを拡大（メイン画面と幅 1:1）",
+    resizeRestore: "ダブルクリックでサイドバーを戻す（サムネイル 1 列）",
     addFiles: "ファイルを追加…",
     dropFiles: "ドロップしてこの文書に追加",
     dropFilesAtEnd: "ドロップしてこの文書の末尾に追加",

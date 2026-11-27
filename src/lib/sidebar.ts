@@ -43,6 +43,36 @@ export function clampSidebarWidth(width: number, windowWidth: number, reserved: 
   return Math.min(limit, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)))
 }
 
+export type SidebarDoubleClick =
+  | { action: "expand"; width: number }
+  | { action: "restore"; width: null }
+
+/** What a double-click on the sidebar's edge does: from its opening width while
+    docked, widen toward half the window (1:1) if the window has room; from any
+    wider width, return to the opening one-column width. */
+export function sidebarDoubleClick(
+  mode: SidebarMode,
+  shownWidth: number,
+  windowWidth: number,
+  reserved: number,
+): SidebarDoubleClick | null {
+  if (mode === "hidden") {
+    return null
+  }
+
+  if (shownWidth >= SIDEBAR_MIN_WIDTH + 1) {
+    return { action: "restore", width: null }
+  }
+
+  if (mode !== "docked") {
+    return null
+  }
+
+  const expanded = clampSidebarWidth(Math.ceil(windowWidth / 2), windowWidth, reserved)
+
+  return expanded > SIDEBAR_MIN_WIDTH ? { action: "expand", width: expanded } : null
+}
+
 /** The window clamps it again as it resizes, in CSS, so a hand-edited width
     need only be a number. */
 export function sidebarWidthOf(stored: unknown): number | null {

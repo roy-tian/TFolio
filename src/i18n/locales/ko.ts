@@ -593,6 +593,8 @@ const ko = {
     show: "사이드바 표시",
     hide: "사이드바 숨기기",
     resize: "사이드바 크기 조정",
+    resizeExpand: "더블클릭하여 사이드바 확장(기본 화면과 너비 1:1)",
+    resizeRestore: "더블클릭하여 사이드바 복원(축소판 1열)",
     addFiles: "파일 추가…",
     dropFiles: "놓아서 이 문서에 추가",
     dropFilesAtEnd: "놓아서 이 문서 끝에 추가",

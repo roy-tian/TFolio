@@ -16,6 +16,9 @@ type HintTooltipProps = {
   /** The text on screen that the label only repeats: the hint then opens
       only while that text is cut short. */
   cutShort?: RefObject<HTMLElement | null>
+  /** Keeps the tooltip shut without unmounting the trigger, preserving focus
+      and active pointer interactions. */
+  disabled?: boolean
   inDelayGroup?: boolean
   label: string | undefined
   /** Whether a focus opens it, as for a reader arriving by keyboard. Off where
@@ -23,6 +26,7 @@ type HintTooltipProps = {
   openOnFocus?: boolean
   side?: "top" | "bottom" | "left" | "right"
   sideOffset?: ComponentProps<typeof TooltipContent>["sideOffset"]
+  trackCursorAxis?: ComponentProps<typeof Tooltip>["trackCursorAxis"]
 }
 
 /** Whether text on screen is cut short, measured as a tooltip repeating it is
@@ -40,11 +44,13 @@ export function HintTooltipGroup({ children }: { children: ReactNode }) {
 export function HintTooltip({
   children,
   cutShort,
+  disabled = false,
   inDelayGroup = false,
   label,
   openOnFocus = true,
   side = "top",
   sideOffset,
+  trackCursorAxis,
 }: HintTooltipProps) {
   if (!label) {
     return children
@@ -56,6 +62,7 @@ export function HintTooltip({
   // clickable, so the popup takes no pointer of its own.
   const tooltip = (
     <Tooltip
+      disabled={disabled}
       disableHoverablePopup
       onOpenChange={(open, details) => {
         // A focus the app moves itself is not a reader asking to read.
@@ -66,6 +73,7 @@ export function HintTooltip({
           details.cancel()
         }
       }}
+      trackCursorAxis={trackCursorAxis}
     >
       <TooltipTrigger render={children} />
       <TooltipContent side={side} sideOffset={sideOffset}>

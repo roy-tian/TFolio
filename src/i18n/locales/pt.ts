@@ -595,6 +595,8 @@ const pt = {
     show: "Mostrar barra lateral",
     hide: "Ocultar barra lateral",
     resize: "Redimensionar barra lateral",
+    resizeExpand: "Clique duplo para expandir a barra lateral (largura 1:1)",
+    resizeRestore: "Clique duplo para restaurar a barra lateral (1 coluna de miniaturas)",
     addFiles: "Adicionar arquivos…",
     dropFiles: "Solte para adicionar a este documento",
     dropFilesAtEnd: "Solte para adicionar ao final deste documento",

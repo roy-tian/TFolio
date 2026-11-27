@@ -594,6 +594,8 @@ const fr = {
     show: "Afficher la barre latérale",
     hide: "Masquer la barre latérale",
     resize: "Redimensionner la barre latérale",
+    resizeExpand: "Double-cliquer pour élargir la barre latérale (largeur 1:1)",
+    resizeRestore: "Double-cliquer pour rétablir la barre latérale (1 colonne de vignettes)",
     addFiles: "Ajouter des fichiers…",
     dropFiles: "Déposez pour les ajouter à ce document",
     dropFilesAtEnd: "Déposez pour les ajouter à la fin de ce document",

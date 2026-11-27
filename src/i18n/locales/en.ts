@@ -591,6 +591,8 @@ const en = {
     show: "Show sidebar",
     hide: "Hide sidebar",
     resize: "Resize sidebar",
+    resizeExpand: "Double-click to expand sidebar (1:1 with main view)",
+    resizeRestore: "Double-click to restore sidebar (1-column thumbnails)",
     addFiles: "Add files…",
     dropFiles: "Drop to add to this document",
     dropFilesAtEnd: "Drop to add at the end of this document",

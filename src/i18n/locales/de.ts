@@ -594,6 +594,8 @@ const de = {
     show: "Seitenleiste einblenden",
     hide: "Seitenleiste ausblenden",
     resize: "Breite der Seitenleiste ändern",
+    resizeExpand: "Doppelklick zum Erweitern der Seitenleiste (1:1 zur Hauptansicht)",
+    resizeRestore: "Doppelklick zum Zurücksetzen der Seitenleiste (1 Spalte Miniaturen)",
     addFiles: "Dateien hinzufügen…",
     dropFiles: "Ablegen, um sie diesem Dokument hinzuzufügen",
     dropFilesAtEnd: "Ablegen, um sie am Ende dieses Dokuments hinzuzufügen",

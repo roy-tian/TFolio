@@ -9,6 +9,7 @@ import {
 import { GalleryVertical, ListTree, PanelLeft, type LucideIcon } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { HintTooltip } from "@/components/HintTooltip"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Toggle } from "@/components/ui/toggle"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
@@ -19,6 +20,7 @@ import {
   isSidebarPanel,
   SIDEBAR_MIN_WIDTH,
   SIDEBAR_WIDTH_STEP,
+  sidebarDoubleClick,
   type SidebarPanel,
 } from "@/lib/sidebar"
 import { cn } from "@/lib/utils"
@@ -130,6 +132,8 @@ function SidebarResizeHandle() {
   const { t } = useTranslation()
   const sidebar = useSidebar()
   const [resizing, setResizing] = useState(false)
+  const [, setMeasuredWindowWidth] = useState(() => window.innerWidth)
+  const syncWindowWidth = () => setMeasuredWindowWidth(window.innerWidth)
   // The drag under way, ended unsettled if the sidebar goes before its release:
   // hidden by its shortcut, or turned into an overlay by a narrowing window.
   const abortRef = useRef<(() => void) | null>(null)
@@ -140,13 +144,6 @@ function SidebarResizeHandle() {
   const shownWidth = (handle: HTMLElement) =>
     handle.closest<HTMLElement>("[data-slot=app-sidebar]")?.getBoundingClientRect().width ??
     SIDEBAR_MIN_WIDTH
-
-  // At its narrowest, docked, the sidebar goes out to meet the pages half way
-  // (1:1); an overlay lies over them and has no half to meet.
-  const widthToggled = (shown: number) =>
-    sidebar.mode === "docked" && shown < SIDEBAR_MIN_WIDTH + 1
-      ? clampSidebarWidth(Math.ceil(window.innerWidth / 2), window.innerWidth, reserved)
-      : null
 
   const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     const handle = event.currentTarget
@@ -247,30 +244,58 @@ function SidebarResizeHandle() {
     )
   }
 
+  const viewportWidth = window.innerWidth
   // As the window shows it: a stored width past the window's room is clamped.
-  const widest = Math.max(SIDEBAR_MIN_WIDTH, Math.floor(window.innerWidth - reserved))
+  const widest = Math.max(SIDEBAR_MIN_WIDTH, Math.floor(viewportWidth - reserved))
+  const shown =
+    sidebar.width === null
+      ? SIDEBAR_MIN_WIDTH
+      : clampSidebarWidth(sidebar.width, viewportWidth, reserved)
+  const doubleClick = sidebarDoubleClick(sidebar.mode, shown, viewportWidth, reserved)
+  const hintLabel =
+    doubleClick?.action === "restore" ? t("sidebar.resizeRestore") : t("sidebar.resizeExpand")
 
   return (
-    <div
-      aria-label={t("sidebar.resize")}
-      aria-orientation="vertical"
-      aria-valuemax={widest}
-      aria-valuemin={SIDEBAR_MIN_WIDTH}
-      aria-valuenow={Math.min(widest, sidebar.width ?? SIDEBAR_MIN_WIDTH)}
-      className="absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize touch-none outline-none after:absolute after:inset-y-0 after:left-1/2 after:w-0.5 after:-translate-x-1/2 after:bg-primary/50 after:opacity-0 after:transition-opacity hover:after:opacity-100 focus-visible:after:opacity-100 data-resizing:after:opacity-100"
-      data-resizing={resizing ? "" : undefined}
-      data-slot="sidebar-resize"
-      onDoubleClick={(event) => setWidth(widthToggled(shownWidth(event.currentTarget)))}
-      onKeyDown={step}
-      onKeyUp={(event) => {
-        if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-          persistWidth()
-        }
-      }}
-      onPointerDown={startDrag}
-      role="separator"
-      tabIndex={0}
-    />
+    <HintTooltip
+      disabled={resizing || doubleClick === null}
+      label={hintLabel}
+      side="right"
+      trackCursorAxis="y"
+    >
+      <div
+        aria-label={t("sidebar.resize")}
+        aria-orientation="vertical"
+        aria-valuemax={widest}
+        aria-valuemin={SIDEBAR_MIN_WIDTH}
+        aria-valuenow={shown}
+        className="absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize touch-none outline-none after:absolute after:inset-y-0 after:left-1/2 after:w-0.5 after:-translate-x-1/2 after:bg-primary/50 after:opacity-0 after:transition-opacity hover:after:opacity-100 focus-visible:after:opacity-100 data-resizing:after:opacity-100"
+        data-resizing={resizing ? "" : undefined}
+        data-slot="sidebar-resize"
+        onDoubleClick={(event) => {
+          const next = sidebarDoubleClick(
+            sidebar.mode,
+            shownWidth(event.currentTarget),
+            window.innerWidth,
+            reserved,
+          )
+
+          if (next) {
+            setWidth(next.width)
+          }
+        }}
+        onFocus={syncWindowWidth}
+        onKeyDown={step}
+        onKeyUp={(event) => {
+          if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+            persistWidth()
+          }
+        }}
+        onPointerDown={startDrag}
+        onPointerEnter={syncWindowWidth}
+        role="separator"
+        tabIndex={0}
+      />
+    </HintTooltip>
   )
 }
 
