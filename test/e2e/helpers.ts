@@ -460,7 +460,7 @@ function buildPdf(objects: string[]) {
 export async function seedSettings(settings: Settings = {}) {
   // The write goes through the backend and needs a booted page — one still
   // booting loses it when the app replaces it — so the wait lives here.
-  await openFileButton().waitForExist({ timeout: 30_000 })
+  await newDocumentButton().waitForExist({ timeout: 30_000 })
 
   // Cleared first: its reappearance is the signal. Polling the file costs the
   // fragile bridge no round trips and checks what the app will actually read.
@@ -537,7 +537,7 @@ export async function refreshApp() {
 
           return (
             stamped.__tfolioReloadStamp === undefined &&
-            !!document.querySelector("[data-slot='tab-open-file']")
+            !!document.querySelector("[data-slot='tab-new-document']")
           )
         })
       } catch {
@@ -557,8 +557,8 @@ export function dropZoneButton() {
   return $("[data-slot='drop-zone']")
 }
 
-export function openFileButton() {
-  return $("[data-slot='tab-open-file']")
+export function newDocumentButton() {
+  return $("[data-slot='tab-new-document']")
 }
 
 /**
@@ -737,15 +737,18 @@ export async function openPdfFromDisk(
 }
 
 /**
- * Points the picker seam at `filePath` and opens from the tab strip, on screen
+ * Points the picker seam at `filePath` and opens from the app menu, on screen
  * whatever is already open — one helper serves first document and later alike.
  */
 export async function openPathViaDialog(filePath: string) {
-  // A refresh can resolve before the new page has booted; the strip's open
+  // A refresh can resolve before the new page has booted; the strip's new
   // button appearing is what proves the seam lands on the page that reads it.
-  await openFileButton().waitForExist({ timeout: 30_000 })
+  await newDocumentButton().waitForExist({ timeout: 30_000 })
+  await newDocumentButton().waitForEnabled({ timeout: 30_000 })
   await pointPickerAt(filePath)
-  await openFileButton().click()
+  const item = await appMenuItem("open")
+  await item.click()
+  await item.waitForDisplayed({ reverse: true, timeout: 15_000 })
 }
 
 /**
@@ -821,7 +824,8 @@ export async function openPdfFromBytes(fileName: string, contents: Uint8Array) {
   const tabsNamed = () =>
     $$(`//button[@role='tab'][normalize-space()='${fileName}']`).length
 
-  await openFileButton().waitForExist({ timeout: 30_000 })
+  await newDocumentButton().waitForExist({ timeout: 30_000 })
+  await newDocumentButton().waitForEnabled({ timeout: 30_000 })
   await browser.execute(
     ({ bytes, mockPath }: { bytes: number[]; mockPath: string }) => {
       const seam = window as unknown as Window & {
@@ -849,7 +853,9 @@ export async function openPdfFromBytes(fileName: string, contents: Uint8Array) {
   // Counted before the click, so a tab already carrying the name cannot
   // pass for the new one and take the overrides off too early.
   const existingTabs = await tabsNamed()
-  await openFileButton().click()
+  const item = await appMenuItem("open")
+  await item.click()
+  await item.waitForDisplayed({ reverse: true, timeout: 15_000 })
   await browser.waitUntil(async () => (await tabsNamed()) > existingTabs, {
     timeout: 30_000,
     timeoutMsg: "the byte-payload document never opened",

@@ -30,7 +30,7 @@ const ko = {
   },
   tabs: {
     home: "홈",
-    openFile: "새 탭에서 PDF 열기",
+    newPdf: "새 PDF",
     list: "작업 영역 탭",
     listAll: "열려 있는 모든 문서",
     close: "{{name}} 닫기",

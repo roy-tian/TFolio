@@ -3,9 +3,8 @@ import { browser, expect, $, $$ } from "@wdio/globals"
 import {
   activeSidebar,
   bandedPdf,
-  openFileButton,
+  openPathViaDialog,
   openPdfFromDisk,
-  pointPickerAt,
   refreshApp,
   seedSettings,
   sidebarPageAction,
@@ -37,8 +36,7 @@ describe("TFolio notices", () => {
 
     // The refusal first and the cut second: the open attempt is the slow half,
     // and the notice waiting through it spends its five seconds on the harness.
-    await pointPickerAt(notPdf)
-    await openFileButton().click()
+    await openPathViaDialog(notPdf)
     await expect($("[data-notice='invalidFile']")).toHaveText(
       "Please choose a PDF, image, or Word document.",
     )

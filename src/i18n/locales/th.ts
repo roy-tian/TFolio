@@ -30,7 +30,7 @@ const th = {
   },
   tabs: {
     home: "หน้าหลัก",
-    openFile: "เปิด PDF ในแท็บใหม่",
+    newPdf: "สร้าง PDF ใหม่",
     list: "แท็บในพื้นที่ทำงาน",
     listAll: "เอกสารที่เปิดอยู่ทั้งหมด",
     close: "ปิด {{name}}",

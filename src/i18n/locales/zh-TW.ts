@@ -30,7 +30,7 @@ const zhTW = {
   },
   tabs: {
     home: "首頁",
-    openFile: "在新分頁中開啟 PDF",
+    newPdf: "新增 PDF",
     list: "工作區分頁",
     listAll: "所有已開啟的文件",
     close: "關閉 {{name}}",

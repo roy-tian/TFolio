@@ -30,7 +30,7 @@ const de = {
   },
   tabs: {
     home: "Start",
-    openFile: "PDF in neuem Tab öffnen",
+    newPdf: "Neues PDF",
     list: "Tabs im Arbeitsbereich",
     listAll: "Alle geöffneten Dokumente",
     close: "{{name}} schließen",

@@ -7,9 +7,9 @@ import {
   ExternalLink,
   FilePlus2,
   FileSignature,
-  FolderOpen,
   House,
   LoaderCircle,
+  Plus,
   SquareX,
   X,
 } from "lucide-react"
@@ -75,7 +75,7 @@ type DocumentTabsProps = {
   onCloseAll: () => void
   /** Closes the document tabs around this one, as `otherTabIds` picks them. */
   onCloseOthers: (documentId: number, which: OtherTabs) => void
-  onOpenFile: () => void
+  onNew: () => void
   /** Reorders the document tabs, both indices among them; home stays first. */
   onReorder: (from: number, to: number) => void
   /** A release the strip did not keep: the workspace owns where the tab goes —
@@ -149,7 +149,7 @@ export function DocumentTabs({
   onClose,
   onCloseAll,
   onCloseOthers,
-  onOpenFile,
+  onNew,
   onReorder,
   onTabDropOutside,
   onTabDragMove,
@@ -276,7 +276,7 @@ export function DocumentTabs({
       data-tab-strip
       ref={stripRef}
     >
-      {/* The open and list actions sit outside the tablist: they are not tabs,
+      {/* The new and list actions sit outside the tablist: they are not tabs,
           and arrow-key tab navigation must not land on them. */}
       <div
         aria-label={t("tabs.list")}
@@ -507,20 +507,20 @@ export function DocumentTabs({
       </div>
 
       <ToolbarTooltip
-        label={t("tabs.openFile")}
-        shortcut={shortcuts.open}
+        label={t("tabs.newPdf")}
+        shortcut={shortcuts.new}
         side="top"
       >
         <Button
-          aria-label={t("tabs.openFile")}
+          aria-label={t("tabs.newPdf")}
           className="mb-0.5 shrink-0"
-          data-slot="tab-open-file"
+          data-slot="tab-new-document"
           disabled={opening}
-          onClick={onOpenFile}
+          onClick={onNew}
           size="icon-sm"
           variant="ghost"
         >
-          {opening ? <LoaderCircle className="animate-spin" /> : <FolderOpen />}
+          {opening ? <LoaderCircle className="animate-spin" /> : <Plus />}
         </Button>
       </ToolbarTooltip>
 

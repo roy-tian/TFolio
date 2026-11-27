@@ -30,7 +30,7 @@ const pt = {
   },
   tabs: {
     home: "Início",
-    openFile: "Abrir PDF em uma nova guia",
+    newPdf: "Novo PDF",
     list: "Guias do espaço de trabalho",
     listAll: "Todos os documentos abertos",
     close: "Fechar {{name}}",

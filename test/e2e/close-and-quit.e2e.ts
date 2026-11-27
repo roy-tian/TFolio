@@ -8,7 +8,7 @@ import {
   clickAppMenuItem,
   deletePageFromSidebar,
   minimalPdf,
-  openFileButton,
+  newDocumentButton,
   openPathViaDialog,
   openPdfFromBytes,
   openPdfFromDisk,
@@ -51,7 +51,7 @@ describe("closing and quitting with unsaved work", () => {
   beforeEach(async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await refreshApp()
-    await openFileButton().waitForExist({ timeout: 30_000 })
+    await newDocumentButton().waitForExist({ timeout: 30_000 })
   })
 
   it("quits at once when nothing is unsaved", async () => {

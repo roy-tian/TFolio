@@ -28,7 +28,7 @@ const en = {
   },
   tabs: {
     home: "Home",
-    openFile: "Open PDF in a new tab",
+    newPdf: "New PDF",
     list: "Workspace tabs",
     listAll: "All open documents",
     close: "Close {{name}}",

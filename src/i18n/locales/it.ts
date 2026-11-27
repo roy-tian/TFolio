@@ -30,7 +30,7 @@ const it = {
   },
   tabs: {
     home: "Home",
-    openFile: "Apri PDF in una nuova scheda",
+    newPdf: "Nuovo PDF",
     list: "Schede dell’area di lavoro",
     listAll: "Tutti i documenti aperti",
     close: "Chiudi {{name}}",

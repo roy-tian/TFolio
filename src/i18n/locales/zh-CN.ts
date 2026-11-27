@@ -30,7 +30,7 @@ const zhCN = {
   },
   tabs: {
     home: "主页",
-    openFile: "在新标签页中打开 PDF",
+    newPdf: "新建 PDF",
     list: "工作区标签页",
     listAll: "全部已打开的文档",
     close: "关闭 {{name}}",

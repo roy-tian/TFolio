@@ -2530,7 +2530,7 @@ export default function App() {
         onClose={requestCloseTab}
         onCloseAll={requestCloseAll}
         onCloseOthers={requestCloseOthers}
-        onOpenFile={() => void chooseFile()}
+        onNew={() => void createDocument()}
         onReorder={reorderTabs}
         onTabDragMove={handleTabDragMove}
         onTabDropOutside={handleTabDropOutside}

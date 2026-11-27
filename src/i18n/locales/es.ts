@@ -30,7 +30,7 @@ const es = {
   },
   tabs: {
     home: "Inicio",
-    openFile: "Abrir PDF en una pestaña nueva",
+    newPdf: "PDF nuevo",
     list: "Pestañas del espacio de trabajo",
     listAll: "Todos los documentos abiertos",
     close: "Cerrar {{name}}",

@@ -30,7 +30,7 @@ const ja = {
   },
   tabs: {
     home: "ホーム",
-    openFile: "新しいタブで PDF を開く",
+    newPdf: "新しい PDF",
     list: "ワークスペースのタブ",
     listAll: "開いているすべての文書",
     close: "{{name}} を閉じる",
