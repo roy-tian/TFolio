@@ -116,8 +116,8 @@ describe("TFolio toolbar tooltips", () => {
     await expect($("#highlight-color-label")).toHaveText("高亮颜色")
   })
 
-  it("names a sidebar panel in a tooltip only once its word is cut short", async () => {
-    const outline = `${activeSidebar} button[aria-label='大纲']`
+  it("names the shown sidebar panel in a tooltip only once its word is cut short", async () => {
+    const switcher = `${activeSidebar} [data-slot='sidebar-panel-switch']`
     const focus = async (maxWidth: string) => {
       await browser.execute(
         (css: string, width: string) => {
@@ -126,33 +126,28 @@ describe("TFolio toolbar tooltips", () => {
           item.blur()
           item.style.maxWidth = width
         },
-        outline,
+        switcher,
         maxWidth,
       )
-      // The option eases from one width to the next, and what its word has
+      // The control eases from one width to the next, and what its word has
       // room for is read as the focus lands.
       await browser.pause(300)
-      await browser.execute((css: string) => document.querySelector<HTMLElement>(css)!.focus(), outline)
+      await browser.execute((css: string) => document.querySelector<HTMLElement>(css)!.focus(), switcher)
     }
 
     // Whole, the word is all a tooltip would say, over the panel's own bar.
     await focus("")
     await browser.pause(500)
-    expect(await tooltipOpen(outline)).toBe(false)
-
-    // Narrowed a little, the icon gives way and the word still stands whole.
-    await focus("56px")
-    await browser.pause(500)
-    expect(await tooltipOpen(outline)).toBe(false)
+    expect(await tooltipOpen(switcher)).toBe(false)
 
     // Narrowed past its word, as a long language's can be at the opening width.
-    await focus("36px")
-    await browser.waitUntil(() => tooltipOpen(outline), {
+    await focus("72px")
+    await browser.waitUntil(() => tooltipOpen(switcher), {
       timeout: 5_000,
       timeoutMsg: "the cut-short panel name never opened its tooltip",
     })
     await focus("")
-    await browser.execute((css: string) => document.querySelector<HTMLElement>(css)!.blur(), outline)
+    await browser.execute((css: string) => document.querySelector<HTMLElement>(css)!.blur(), switcher)
   })
 
   it("folds the layer buttons' words while the title bar cannot hold them", async () => {

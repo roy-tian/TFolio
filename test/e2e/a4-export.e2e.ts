@@ -14,6 +14,7 @@ import {
   refreshApp,
   renderedPage,
   seedSettings,
+  switchSidebarPanel,
   writeScratchPdf,
 } from "./helpers"
 
@@ -108,7 +109,7 @@ describe("TFolio fit to A4", () => {
     await browser.waitUntil(async () => (await pageShapes()).length === 4, {
       timeoutMsg: "the blank between the files was not created",
     })
-    await $(`${activeSidebar} button[aria-label='Outline']`).click()
+    await switchSidebarPanel("bookmarks")
     const bookmarks = $(`${activeSidebar} nav[aria-label='Bookmarks']`)
     await expect(bookmarks).toHaveText(expect.stringContaining("own.pdf"))
     await expect(bookmarks).toHaveText(expect.stringContaining("Second half"))

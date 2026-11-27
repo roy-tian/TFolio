@@ -13,6 +13,7 @@ import {
   refreshApp,
   renderedPage,
   seedSettings,
+  switchSidebarPanel,
   textPdf,
 } from "./helpers"
 import { calibratePointer, pointer } from "./nativePointer"
@@ -221,11 +222,15 @@ describe("TFolio PDF viewer", () => {
     await expect(pageInput).toHaveValue("1")
 
     // Either panel opens for any document: one with no bookmarks says so.
-    await $(`${activeSidebar} button[aria-label='Outline']`).click()
+    const switcher = $(`${activeSidebar} [data-slot='sidebar-panel-switch']`)
+    await expect(switcher).toHaveText("Thumbnails")
+    await switchSidebarPanel("bookmarks")
+    await expect(switcher).toHaveText("Outline")
     await expect($(`${activeSidebar} nav[aria-label='Bookmarks']`)).toHaveText(
       "This document has no bookmarks",
     )
-    await $(`${activeSidebar} button[aria-label='Thumbnails']`).click()
+    await switchSidebarPanel("thumbnails")
+    await expect(switcher).toHaveText("Thumbnails")
     await $(`${activeSidebar} [data-slot='sidebar-thumbnails']`).waitForExist()
 
     await clickAppMenuItem("settings")
@@ -321,7 +326,7 @@ describe("TFolio PDF viewer", () => {
     const bookmarks = $(`${activeSidebar} nav[aria-label='Bookmarks']`)
     const pageInput = $("input[aria-label='Page number']")
 
-    await $(`${activeSidebar} button[aria-label='Outline']`).click()
+    await switchSidebarPanel("bookmarks")
     await expect(bookmarks).toHaveText("Second half")
     await bookmarks.$("button").click()
     await expect(pageInput).toHaveValue("2")
@@ -333,7 +338,7 @@ describe("TFolio PDF viewer", () => {
 
     // The other panel previews every page and follows the reader's — which
     // the trip through the views may have moved, both pages being in sight.
-    await $(`${activeSidebar} button[aria-label='Thumbnails']`).click()
+    await switchSidebarPanel("thumbnails")
     await expect(bookmarks).not.toBeExisting()
     const preview = (page: string) =>
       $(`${activeSidebar} button[aria-label='Go to page ${page}']`)
@@ -357,7 +362,7 @@ describe("TFolio PDF viewer", () => {
     const chapter = () => bookmarks.$("button=Chapter one")
     const arrow = bookmarks.$("[data-slot='bookmark-fold']")
 
-    await $(`${activeSidebar} button[aria-label='Outline']`).click()
+    await switchSidebarPanel("bookmarks")
     await expect(chapter()).toBeDisplayed()
     await expect(foldAll).toHaveAttribute("aria-label", "Collapse all bookmarks")
     // Named apart from the bookmark beside it, which goes to its page.
@@ -375,8 +380,8 @@ describe("TFolio PDF viewer", () => {
 
     // Folds are the tab's, kept while the sidebar shows its pages.
     await foldAll.click()
-    await $(`${activeSidebar} button[aria-label='Thumbnails']`).click()
-    await $(`${activeSidebar} button[aria-label='Outline']`).click()
+    await switchSidebarPanel("thumbnails")
+    await switchSidebarPanel("bookmarks")
     await expect(bookmarks.$("button=Part two")).toBeDisplayed()
     await expect(chapter()).not.toBeExisting()
   })
@@ -388,7 +393,7 @@ describe("TFolio PDF viewer", () => {
     await $("[data-page-number='1']").waitForDisplayed()
 
     const bookmarks = $(`${activeSidebar} nav[aria-label='Bookmarks']`)
-    await $(`${activeSidebar} button[aria-label='Outline']`).click()
+    await switchSidebarPanel("bookmarks")
     await bookmarks.$("button=Part one").waitForDisplayed()
 
     const rowTools = `${activeSidebar} nav[aria-label='Bookmarks'] [data-slot='bookmark-tools']`

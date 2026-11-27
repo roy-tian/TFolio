@@ -639,6 +639,18 @@ export async function appMenuItem(action: string) {
 export const activeSidebar =
   "[data-document-session][data-active='true'] [data-slot='app-sidebar']"
 
+/** Opens the shown tab's sidebar panel menu and switches to `panel`. */
+export async function switchSidebarPanel(panel: "bookmarks" | "thumbnails") {
+  const trigger = $(`${activeSidebar} [data-slot='sidebar-panel-switch']`)
+  await trigger.waitForDisplayed({ timeout: 15_000 })
+  await trigger.click()
+
+  const item = $(`[data-sidebar-panel='${panel}']`)
+  await item.waitForDisplayed({ timeout: 15_000 })
+  await item.click()
+  await item.waitForDisplayed({ reverse: true, timeout: 15_000 })
+}
+
 /** Opens a page's menu in the shown tab's sidebar, which also chooses the
     page if it was not chosen, and takes the action named by `data-action`. */
 export function sidebarPageAction(pageNumber: number, action: string) {

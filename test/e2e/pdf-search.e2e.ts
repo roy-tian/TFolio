@@ -10,6 +10,7 @@ import {
   refreshApp,
   seedSettings,
   sidebarPageAction,
+  switchSidebarPanel,
   wrappedSearchPdf,
 } from "./helpers"
 
@@ -277,7 +278,7 @@ describe("TFolio PDF search", () => {
     )
 
     // Switching to bookmarks opens directly on the active chapter.
-    await $(`${activeSidebar} button[aria-label='Outline']`).click()
+    await switchSidebarPanel("bookmarks")
     await browser.waitUntil(
       async () => {
         const state = await bookmarkInView("Chapter 25")
