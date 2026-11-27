@@ -105,6 +105,8 @@ import {
 import { storedSignatureHandling } from "@/lib/signatureHandling"
 import { e2eOverride } from "@/lib/e2e"
 import { createSingleFlightGate } from "@/lib/fileDialogGate"
+import { historyAction } from "@/lib/historyAction"
+import type { DocumentMenuState } from "@/lib/nativeMenu"
 import { fileMoveOrder, foldedAway, nearestFileEdge } from "@/lib/pageSections"
 import {
   answerSourceSignatures,
@@ -169,6 +171,7 @@ import {
 import { CONTENT_PADDING_X, CONTENT_PADDING_Y } from "@/lib/zoom"
 
 export type DocumentSessionHandle = {
+  addFilesFromPicker: () => void
   /** Another tab's pages let go on this one's tab: copies at the end, or null
       where the document cannot take them now. Settles on whether they landed. */
   appendCarriedPages: (carried: CarriedPages) => Promise<boolean> | null
@@ -186,9 +189,16 @@ export type DocumentSessionHandle = {
   hasUnsavedWorkNow: () => boolean
   /** Whether a save could only write a copy, never the document's own file. */
   isCopyOnlyNow: () => boolean
+  openCompress: () => void
+  openExportImages: () => void
+  openFitA4: () => void
   openPageNumbers: () => void
   openSearch: () => void
+  openSplit: () => void
   openWatermark: () => void
+  setViewMode: (mode: ViewMode) => void
+  toggleTool: (tool: Exclude<AnnotationTool, null>) => void
+  zoomFit: (preset: "fit-width" | "fit-page") => void
   rememberViewNow: () => Promise<void>
   /** Everything only this session knows about the tab it shows, for a move to
       another window — or why the move must wait, and null where there is no
@@ -241,6 +251,8 @@ type DocumentSessionProps = {
       tab now shows that file, as opening it again would. */
   onCombinedSaved: (documentId: number) => void
   onDirtyChange: (documentId: number, dirty: boolean) => void
+  /** Syncs the active session's state to the macOS menu bar. */
+  onMenuStateChange?: (documentId: number, state: DocumentMenuState) => void
   /** An unsaved A4 copy opened in a new tab beside the document it was made
       from, so the reader can inspect it and save manually. */
   onOpenedA4: (documentId: number, document: PdfDocumentInfo, name: string) => void
@@ -283,6 +295,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       notices,
       onCombinedSaved,
       onDirtyChange,
+      onMenuStateChange,
       onOpenedA4,
       onSavableChange,
       onSourceChange,
@@ -1824,13 +1837,16 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
     // Each mode stacks pages to a different height, so the kept offset would land
     // somewhere unrelated; queued here, ahead of the next render's layout effects.
-    const changeViewMode = (mode: ViewMode) => {
-      if (mode !== viewMode) {
-        pendingScrollPageRef.current = currentPage.get()
-      }
+    const changeViewMode = useCallback(
+      (mode: ViewMode) => {
+        if (mode !== viewMode) {
+          pendingScrollPageRef.current = currentPage.get()
+        }
 
-      setPreferredViewMode(mode)
-    }
+        setPreferredViewMode(mode)
+      },
+      [currentPage, viewMode],
+    )
 
     // The reader widened the sidebar to half the window or more: what it leaves
     // the pages is too narrow for a spread. The tab shown gives book view up,
@@ -2165,6 +2181,57 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       onSavableChange(openedDocument.id, canSave)
     }, [canSave, onSavableChange, openedDocument.id])
 
+    useEffect(() => {
+      if (!active || !onMenuStateChange) {
+        return
+      }
+
+      const describeHistoryAction = (command: AnnotationCommand) => {
+        const action = historyAction(command)
+
+        return "count" in action
+          ? t(action.key, { count: action.count })
+          : t(action.key)
+      }
+
+      const undoLabel = annotations.nextUndo
+        ? t("annotate.undoAction", { action: describeHistoryAction(annotations.nextUndo) })
+        : t("annotate.undo")
+      const redoLabel = annotations.nextRedo
+        ? t("annotate.redoAction", { action: describeHistoryAction(annotations.nextRedo) })
+        : t("annotate.redo")
+
+      onMenuStateChange(openedDocument.id, {
+        activeTool,
+        bookApplies,
+        canRedo: annotations.canRedo,
+        canSave,
+        canUndo: annotations.canUndo,
+        redoLabel,
+        saveAsOnly,
+        undoLabel,
+        viewMode,
+        zoomCanIn: zoom.canZoomIn,
+        zoomCanOut: zoom.canZoomOut,
+      })
+    }, [
+      active,
+      activeTool,
+      annotations.canRedo,
+      annotations.canUndo,
+      annotations.nextRedo,
+      annotations.nextUndo,
+      bookApplies,
+      canSave,
+      onMenuStateChange,
+      openedDocument.id,
+      saveAsOnly,
+      t,
+      viewMode,
+      zoom.canZoomIn,
+      zoom.canZoomOut,
+    ])
+
     // Armed when the paste handler lands, so a keypress ahead of the render
     // still pastes what the clipboard holds: after the page, into its file.
     pasteAfterRef.current = (after) =>
@@ -2201,6 +2268,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               (thumbnailsRef.current?.fileDropSlot(point) ??
                 filesTreeRef.current?.fileDropSlot(point)),
           ),
+        addFilesFromPicker: () => void chooseFiles(),
         appendCarriedPages: (carried) => pageOpsRef.current.appendCarriedPages(carried),
         canTakePagesNow: () => pageOpsRef.current.canTakeCarriedPages(),
         dismissNoteFont: clearNoteFontOffer,
@@ -2209,8 +2277,12 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         hasUnsavedChangesNow,
         hasUnsavedWorkNow,
         isCopyOnlyNow,
+        openCompress: () => setCompressOpen(true),
+        openExportImages: () => setImageExportOpen(true),
+        openFitA4: () => setA4Open(true),
         openPageNumbers: openPageNumbersDialog,
         openSearch,
+        openSplit: () => setSplitOpen(true),
         openWatermark: openWatermarkDialog,
         redo: () => {
           if (annotations.canRedo) {
@@ -2223,11 +2295,13 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         saveFromKey,
         saveForClose,
         selectAll,
+        setViewMode: changeViewMode,
         stopLayerWork: () => {
           layerStoppingRef.current = true
           void annotations.cancelOperation()
         },
         snapshotForMove,
+        toggleTool: (tool) => chooseTool(activeTool === tool ? null : tool),
         undo: () => {
           if (annotations.canUndo) {
             undoStep()
@@ -2243,10 +2317,15 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             zoom.applyPreset("actual-size", { announce: true })
           }
         },
+        zoomFit: (preset) => zoom.applyPreset(preset, { announce: true }),
       }),
       [
+        activeTool,
         annotations.canRedo,
         annotations.canUndo,
+        changeViewMode,
+        chooseFiles,
+        chooseTool,
         clearNoteFontOffer,
         ensureSignatures,
         exportPdf,
@@ -2372,7 +2451,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         <SessionHeader
           active={active}
           annotations={annotations}
-          appMenu={appMenu}
+          appMenu={macOS ? null : appMenu}
           canSave={canSave}
           macOS={macOS}
           onSave={saveDocument}

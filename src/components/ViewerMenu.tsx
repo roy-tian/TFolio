@@ -2,7 +2,12 @@ import { useRef, useState, type MouseEvent, type ReactElement, type ReactNode } 
 import { Copy, Highlighter } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import { PageMenuItems, type PageMenuActions } from "@/components/PageContextMenu"
+import {
+  buildPageMenuItems,
+  PageMenuItems,
+  runPageMenuAction,
+  type PageMenuActions,
+} from "@/components/PageContextMenu"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -12,7 +17,9 @@ import {
 } from "@/components/ui/context-menu"
 import type { CaptureHighlight } from "@/hooks/useHighlightTool"
 import { copyPlainText } from "@/lib/clipboard"
+import { popupNativeContextMenu, type NativeContextMenuItem } from "@/lib/nativeMenu"
 import type { PdfPageInfo } from "@/lib/pdf"
+import { isMacOS } from "@/lib/platform"
 import { selectedPagesText } from "@/lib/selectionText"
 
 /** What the reader has selected, but only where the selection is a page's own
@@ -48,7 +55,7 @@ type ViewerMenuProps = {
       them, and the menu then closes rather than act on another page. */
   pages: PdfPageInfo[]
   /** The viewer's scroll box, which the menu opens over. */
-  viewer: ReactElement
+  viewer: ReactElement<{ onContextMenu?: (event: MouseEvent<Element>) => void }>
 }
 
 /**
@@ -67,21 +74,133 @@ export function ViewerMenu({
   viewer,
 }: ViewerMenuProps) {
   const { t } = useTranslation()
+  const macOS = isMacOS()
+  const pagesRef = useRef(pages)
+  pagesRef.current = pages
   // Taken as the menu opens, not as an item is clicked: pressing in the popup
   // collapses the very selection the copy and the highlight are of.
   const selected = useRef<string | Promise<string>>("")
   const [menu, setMenu] = useState<{
+    anchor?: { getBoundingClientRect: () => DOMRect }
     highlight: (() => void) | null
     pageNumber: number | null
     pages: PdfPageInfo[]
     text: boolean
   } | null>(null)
+  // Re-enables the DOM context menu for the current pages snapshot if the
+  // native NSMenu popup fails on macOS.
+  const [nativeFallbackPages, setNativeFallbackPages] = useState<PdfPageInfo[] | null>(null)
+  const nativeFallback = nativeFallbackPages === pages
   const shown = menu?.pages === pages ? menu : null
 
-  const open = (event: MouseEvent) => {
+  const open = (event: MouseEvent<Element>) => {
     const target = event.target as Element
     const overText = target.closest(".pdf-text-layer") !== null
     const text = overText && !onCopyAllText ? selectedPageText() : ""
+    const takesText = overText && (Boolean(onCopyAllText) || text !== "")
+    const page = target.closest<HTMLElement>("[data-page-number]")
+    const pageNumber = page ? Number(page.dataset.pageNumber) : null
+    const highlight = text === "" ? null : captureHighlight()
+
+    if (macOS && !nativeFallback) {
+      if (!takesText && pageNumber === null) {
+        return
+      }
+
+      event.preventDefault()
+
+      // Capture pointer position before awaiting IPC so the React fallback can
+      // anchor where the user clicked even when the trigger root was disabled.
+      const point = { x: event.clientX, y: event.clientY }
+
+      // Resolve in the open gesture so `copy-text` never reads a mutated ref
+      // if another context event lands before the native menu returns.
+      let resolvedText: string | null = typeof text === "string" ? text : null
+      if (typeof text !== "string") {
+        void text.then((settled) => {
+          resolvedText = settled
+        })
+      }
+
+      const items: NativeContextMenuItem[] = []
+      if (takesText) {
+        items.push({ kind: "item", id: "copy-text", label: t("viewer.copyText") })
+        if (highlight) {
+          items.push({ kind: "item", id: "highlight-text", label: t("viewer.highlightText") })
+        }
+      }
+
+      const pageActions = pageNumber !== null ? pageMenu(pageNumber) : null
+      if (takesText && pageActions) {
+        items.push({ kind: "separator" })
+      }
+      if (pageActions) {
+        items.push(...buildPageMenuItems(pageActions, t))
+      }
+
+      const pagesSnapshot = pages
+      const copyAllHandler = onCopyAllText
+
+      void popupNativeContextMenu(items)
+        .then((chosen) => {
+          if (!chosen || pagesRef.current !== pagesSnapshot) {
+            return
+          }
+
+          if (chosen === "copy-text") {
+            if (copyAllHandler) {
+              copyAllHandler()
+            } else if (resolvedText !== null) {
+              copyPlainText(resolvedText)
+            } else if (typeof text !== "string") {
+              void text.then(copyPlainText)
+            }
+            return
+          }
+
+          if (chosen === "highlight-text") {
+            highlight?.()
+            return
+          }
+
+          if (pageActions) {
+            runPageMenuAction(chosen, pageActions)
+          }
+        })
+        .catch((error: unknown) => {
+          console.warn("Native viewer context menu failed:", error)
+          if (pagesRef.current !== pagesSnapshot) {
+            return
+          }
+
+          selected.current = resolvedText ?? text
+          if (resolvedText === null && typeof text !== "string") {
+            void text.then((settled) => {
+              if (selected.current === text) {
+                selected.current = settled
+              }
+            })
+          }
+
+          setNativeFallbackPages(pagesSnapshot)
+          setMenu({
+            anchor: {
+              getBoundingClientRect: () =>
+                DOMRect.fromRect({ height: 0, width: 0, x: point.x, y: point.y }),
+            },
+            highlight,
+            pageNumber,
+            pages: pagesSnapshot,
+            text: takesText,
+          })
+        })
+      return
+    }
+
+    if (!takesText && pageNumber === null) {
+      setMenu(null)
+      return
+    }
 
     selected.current = text
 
@@ -95,40 +214,34 @@ export function ViewerMenu({
       })
     }
 
-    const takesText = overText && (Boolean(onCopyAllText) || text !== "")
-    const page = target.closest<HTMLElement>("[data-page-number]")
-    const pageNumber = page ? Number(page.dataset.pageNumber) : null
-
-    setMenu(
-      takesText || pageNumber !== null
-        ? {
-            // A select-all is app state with no WebView range behind it, so
-            // it leaves nothing here to mark.
-            highlight: text === "" ? null : captureHighlight(),
-            pageNumber,
-            pages,
-            text: takesText,
-          }
-        : null,
-    )
+    setMenu({
+      // A select-all is app state with no WebView range behind it, so
+      // it leaves nothing here to mark.
+      highlight,
+      pageNumber,
+      pages,
+      text: takesText,
+    })
   }
 
   return (
     <ContextMenu
+      disabled={macOS && !nativeFallback}
       onOpenChange={(nextOpen) => {
         if (!nextOpen) {
+          setNativeFallbackPages(null)
           setMenu(null)
         }
       }}
       // Opened by a press over a page or its selected text alone: elsewhere
       // in the view there is nothing for the entries to act on.
-      open={shown !== null}
+      open={(!macOS || nativeFallback) && shown !== null}
     >
       <ContextMenuTrigger onContextMenu={open} render={viewer}>
         {children}
       </ContextMenuTrigger>
       {shown ? (
-        <ContextMenuContent>
+        <ContextMenuContent anchor={shown.anchor}>
           {shown.text ? (
             <>
               <ContextMenuItem

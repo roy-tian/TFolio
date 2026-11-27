@@ -45,7 +45,9 @@ import {
   type TabId,
 } from "@/lib/documentTabs"
 import { TAB_SPRING_MS } from "@/lib/pageCarry"
+import { popupNativeContextMenu, type NativeContextMenuItem } from "@/lib/nativeMenu"
 import { signatureMark, type PdfSignatures } from "@/lib/pdf"
+import { isMacOS } from "@/lib/platform"
 import { shortcuts } from "@/lib/shortcuts"
 import { cn } from "@/lib/utils"
 
@@ -158,6 +160,7 @@ export function DocumentTabs({
   tabs,
 }: DocumentTabsProps) {
   const { t } = useTranslation()
+  const macOS = isMacOS()
   const scrollerRef = useRef<HTMLDivElement>(null)
   const stripRef = useRef<HTMLDivElement>(null)
   const [scrolls, setScrolls] = useState(false)
@@ -328,7 +331,7 @@ export function DocumentTabs({
                 const mark = signatureMark(tab.document.signatures)
 
                 return (
-                  <ContextMenu key={tab.id}>
+                  <ContextMenu disabled={macOS} key={tab.id}>
                     {/* A tab is its own menu trigger: the entries below act on
                         or from this tab, and no other surface here has any. */}
                     <ContextMenuTrigger
@@ -355,6 +358,71 @@ export function DocumentTabs({
                           )}
                           data-document-tab={tab.id}
                           data-list-index={index}
+                          onContextMenu={
+                            macOS
+                              ? (event) => {
+                                  event.preventDefault()
+
+                                  const items: NativeContextMenuItem[] = [
+                                    {
+                                      kind: "item",
+                                      id: "tab-move-new-window",
+                                      label: t("tabs.moveToNewWindow"),
+                                    },
+                                    { kind: "separator" },
+                                    {
+                                      kind: "item",
+                                      id: "tab-close",
+                                      label: t("tabs.close", { name: tab.name }),
+                                    },
+                                  ]
+
+                                  if (tabs.length > 1) {
+                                    items.push({
+                                      kind: "item",
+                                      id: "tab-close-others",
+                                      label: t("tabs.closeOthers"),
+                                    })
+                                  }
+
+                                  if (index < tabs.length - 1) {
+                                    items.push({
+                                      kind: "item",
+                                      id: "tab-close-right",
+                                      label: t("tabs.closeToRight"),
+                                    })
+                                  }
+
+                                  if (tabs.length > 1) {
+                                    items.push({
+                                      kind: "item",
+                                      id: "tab-close-all",
+                                      label: t("tabs.closeAll"),
+                                    })
+                                  }
+
+                                  void popupNativeContextMenu(items).then((chosen) => {
+                                    switch (chosen) {
+                                      case "tab-move-new-window":
+                                        onMoveToNewWindow?.(tab.id)
+                                        break
+                                      case "tab-close":
+                                        onClose(tab.id)
+                                        break
+                                      case "tab-close-others":
+                                        onCloseOthers(tab.id, "all")
+                                        break
+                                      case "tab-close-right":
+                                        onCloseOthers(tab.id, "right")
+                                        break
+                                      case "tab-close-all":
+                                        onCloseAll()
+                                        break
+                                    }
+                                  })
+                                }
+                              : undefined
+                          }
                           style={{
                             transform:
                               wayOffset === 0

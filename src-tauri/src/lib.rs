@@ -1,5 +1,6 @@
 mod handoff;
 mod launch;
+mod native_menu;
 mod pdfium;
 mod quit;
 mod recent;
@@ -86,11 +87,9 @@ pub fn run() {
     // Cmd+Q must reach the unsaved check; the Dock's Quit and a logout still
     // end the app unasked, since tao gives no hook to refuse them.
     #[cfg(target_os = "macos")]
-    let builder = builder.menu(quit::app_menu).on_menu_event(|app, event| {
-        if event.id().0 == quit::QUIT_MENU_ID {
-            quit::request_quit(app);
-        }
-    });
+    let builder = builder
+        .menu(native_menu::initial_app_menu)
+        .on_menu_event(native_menu::handle_menu_event);
 
     #[cfg(feature = "e2e")]
     let builder = builder
@@ -111,6 +110,7 @@ pub fn run() {
             app.manage(HandoffQueue::default());
             app.manage(AppWindows::default());
             app.manage(DocumentOwners::default());
+            app.manage(native_menu::NativeMenuState::default());
             app.manage(UpdateState::default());
             app.manage(WindowState::load(app.handle()));
             // Not in the GUI suite: a spec may not reach the network, and
@@ -140,18 +140,25 @@ pub fn run() {
             }
             tauri::WindowEvent::Focused(true) => {
                 windows::remember_focus(window.app_handle(), window.label());
+                #[cfg(target_os = "macos")]
+                native_menu::on_window_focused(window.app_handle());
                 window_state::remember(window.app_handle(), window)
             }
             tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_) => {
                 window_state::remember(window.app_handle(), window)
             }
             tauri::WindowEvent::Destroyed => {
-                windows::window_gone(window.app_handle(), window.label())
+                windows::window_gone(window.app_handle(), window.label());
+                #[cfg(target_os = "macos")]
+                native_menu::on_window_destroyed(window.app_handle(), window.label());
             }
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             window_background::set_workspace_background,
+            native_menu::sync_macos_menu,
+            native_menu::popup_context_menu,
+            native_menu::write_clipboard_text,
             create_pdf,
             open_pdf,
             open_pdf_from_path,

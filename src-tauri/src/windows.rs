@@ -43,7 +43,7 @@ impl Default for AppWindows {
 /// Which of a window's page loads a command started under. A reload releases
 /// the window's documents as the new page starts, so a document an older page
 /// asked for would land in a page that no longer knows of it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PageGeneration(u64);
 
 impl AppWindows {

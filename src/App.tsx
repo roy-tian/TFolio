@@ -35,6 +35,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { AppUpdateContext, useAppUpdate } from "@/hooks/useAppUpdate"
+import { useMacMenu } from "@/hooks/useMacMenu"
 import { useNotices } from "@/hooks/useNotices"
 import { useReopenTab, type Reopened } from "@/hooks/useReopenTab"
 import { useBatchLimitPrompt } from "@/hooks/useBatchLimitPrompt"
@@ -77,6 +78,7 @@ import { isMacOS, isWindows } from "@/lib/platform"
 import { sidebarWidthStyle } from "@/lib/sidebar"
 import { cn } from "@/lib/utils"
 import { findOpenFile } from "@/lib/openFiles"
+import type { DocumentMenuState } from "@/lib/nativeMenu"
 import {
   classifyOpenSource,
   partitionOpenable,
@@ -1753,10 +1755,62 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] =
     useState<SettingsSection>("appearance")
-  const showSettings = useCallback((section: SettingsSection) => {
-    setSettingsSection(section)
-    setSettingsOpen(true)
+  const [aboutCheckKey, setAboutCheckKey] = useState(0)
+  const showSettings = useCallback(
+    (section: SettingsSection, options?: { recheck?: boolean }) => {
+      setSettingsSection(section)
+      setSettingsOpen(true)
+
+      if (options?.recheck) {
+        setAboutCheckKey((key) => key + 1)
+      }
+    },
+    [],
+  )
+
+  const [activeMenuDoc, setActiveMenuDoc] = useState<{
+    documentId: number
+    state: DocumentMenuState
+  } | null>(null)
+  const handleDocumentMenuState = useCallback(
+    (documentId: number, state: DocumentMenuState) => {
+      setActiveMenuDoc({ documentId, state })
+    },
+    [],
+  )
+  const activeDocumentMenuState =
+    activeId === HOME_TAB_ID
+      ? null
+      : activeMenuDoc?.documentId === activeId
+        ? activeMenuDoc.state
+        : null
+
+  const activeSession = useCallback(() => {
+    const tabId = activeIdRef.current
+
+    return tabId === HOME_TAB_ID ? undefined : sessionRefs.current.get(tabId)
   }, [])
+
+  useMacMenu({
+    activeId,
+    activeSession,
+    canCloseAll: tabs.length > 0,
+    canSaveAll,
+    documentState: activeDocumentMenuState,
+    enabled: macOS,
+    onCloseAll: requestCloseAll,
+    onCloseTab: requestCloseTab,
+    onNew: () => void createDocument(),
+    onNewWindow: openNewWindow,
+    onOpen: () => void chooseFile(),
+    onOpenRecent: (path) => void openPaths([path]),
+    onRefreshRecent: refreshRecentFiles,
+    onSaveAll: saveAllDocuments,
+    onShowSettings: showSettings,
+    onToggleSidebar: sidebar.toggle,
+    recentFiles,
+    sidebarShown: sidebar.mode !== "hidden",
+  })
 
   const menuActions: AppMenuActions = useMemo(
     () => ({
@@ -2469,7 +2523,7 @@ export default function App() {
           </AppSidebar>
           <ToolbarFrame
             active
-            appMenu={<AppMenu {...menuActions} />}
+            appMenu={macOS ? null : <AppMenu {...menuActions} />}
             macOS={macOS}
           />
         </>
@@ -2505,6 +2559,7 @@ export default function App() {
           movedSeed={tab.movedSeed}
           notices={notices}
           onDirtyChange={updateDirty}
+          onMenuStateChange={macOS ? handleDocumentMenuState : undefined}
           onSavableChange={updateSavable}
           onCombinedSaved={reopenCombinedTab}
           onOpenedA4={openA4Tab}
@@ -2626,6 +2681,7 @@ export default function App() {
       />
 
       <SettingsDialog
+        aboutCheckKey={aboutCheckKey}
         onOpenChange={setSettingsOpen}
         onSectionChange={setSettingsSection}
         open={settingsOpen}

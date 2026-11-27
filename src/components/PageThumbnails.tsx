@@ -19,7 +19,16 @@ import {
   type PageDragGhostHandle,
   type PageDragGhostState,
 } from "@/components/PageDragGhost"
-import { FileMenuContent, PageMenuContent } from "@/components/PageContextMenu"
+import {
+  buildFileMenuItems,
+  buildPageMenuItems,
+  FileMenuContent,
+  PageMenuContent,
+  runFileMenuAction,
+  runPageMenuAction,
+  type FileMenuActions,
+  type PageMenuActions,
+} from "@/components/PageContextMenu"
 import {
   CarriedHoles,
   FILE_HEADING_NAME,
@@ -47,6 +56,7 @@ import {
 import type { RenderEpochs } from "@/lib/annotations"
 import { isTypingTarget } from "@/lib/contextMenu"
 import { storedFileOptions } from "@/lib/fileSources"
+import { popupNativeContextMenu } from "@/lib/nativeMenu"
 import { stripSpotAt, type CarriedPages } from "@/lib/pageCarry"
 import {
   besideColumn,
@@ -67,6 +77,7 @@ import type { ParkedPreviews } from "@/lib/parkedPreviews"
 import { paddingAroundDropped, paddingPositions, type PaddingSheet } from "@/lib/padding"
 import { fileRuns, landingInFile, nearestFileEdge, pagesOfSection } from "@/lib/pageSections"
 import type { FileOptions, PdfPageInfo, PdfSection } from "@/lib/pdf"
+import { isMacOS } from "@/lib/platform"
 import { THUMBNAIL_COLUMN_GAP, THUMBNAIL_GRID_GAP, thumbnailColumns } from "@/lib/sidebar"
 import { lowestPage, type SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
@@ -207,7 +218,11 @@ type PageThumbnailsProps = {
   onReorderPages: (order: number[]) => Promise<unknown>
   /** That page alone: a page's own bar. */
   onRotatePage: (pageNumber: number, degrees: 90 | 270) => void
-  onRotatePages: (degrees: 90 | 270) => void
+  onRotatePages: (
+    degrees: 90 | 270,
+    pages?: Iterable<number>,
+    expectedPages?: readonly PdfPageInfo[],
+  ) => void
   onSelectPage: (pageNumber: number, modifiers: SelectionModifiers) => void
   /** A file's name pressed: its pages chosen as one. */
   onSelectPages: (pages: readonly number[], modifiers: SelectionModifiers) => void
@@ -268,6 +283,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   thumbnailKeys,
 }, ref) {
   const { t } = useTranslation()
+  const macOS = isMacOS()
   const listRef = useRef<HTMLDivElement>(null)
   const surfaceRef = useRef<HTMLDivElement>(null)
   const columnRef = useRef<HTMLOListElement>(null)
@@ -276,6 +292,10 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     pageNumber: number
     pages: PdfPageInfo[]
   } | null>(null)
+  // Re-enables the DOM context menu for the current pages snapshot if the
+  // native NSMenu IPC fails on macOS.
+  const [nativeFallbackPages, setNativeFallbackPages] = useState<PdfPageInfo[] | null>(null)
+  const nativeFallback = nativeFallbackPages === pages
   // A file's name has a menu of its own; `first` is the page its heading
   // stands over, which tells one run of a parted file from the other.
   const [fileMenu, setFileMenu] = useState<{
@@ -1368,16 +1388,18 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
         <ContextMenu
           onOpenChange={(open) => {
             if (!open) {
+              setNativeFallbackPages(null)
               setMenu(null)
               setFileMenu(null)
             }
           }}
           // Off while a file's name is typed: the field keeps the WebView's
-          // own cut, copy and paste menu.
-          disabled={renamed !== null}
+          // own cut, copy and paste menu. Also off on macOS unless the native
+          // NSMenu popup fell back to the DOM menu.
+          disabled={(macOS && !nativeFallback) || renamed !== null}
           // Opened by a press on a page or a file's name alone: elsewhere in
           // the column there is nothing for the entries to act on.
-          open={menuPage !== null || menuFile !== null}
+          open={(!macOS || nativeFallback) && (menuPage !== null || menuFile !== null)}
         >
           <ContextMenuTrigger
             render={
@@ -1409,12 +1431,58 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                   )
 
                   if (heading) {
-                    setMenu(null)
-                    setFileMenu({
+                    const targetFile = {
                       first: Number(heading.dataset.runFirst),
                       pages,
                       section: Number(heading.dataset.sectionHeader),
-                    })
+                    }
+
+                    if (macOS && !nativeFallback) {
+                      event.preventDefault()
+                      const fileActions: FileMenuActions = {
+                        canPaste,
+                        onPaste: (end) => {
+                          const run = fileRuns(pages).find(
+                            (each) => each.first === targetFile.first,
+                          )
+
+                          if (run) {
+                            onPastePages(
+                              end === "start" ? run.first : run.first + run.count,
+                              targetFile.section,
+                            )
+                          }
+                        },
+                        onRemove: () => onRemoveFile(targetFile.section),
+                        onRename: () => setRenaming(targetFile),
+                        onSelect: () =>
+                          onSelectPages(pagesOfSection(pages, targetFile.section), {
+                            range: false,
+                            toggle: false,
+                          }),
+                        removeDisabled: (filePages.get(targetFile.section) ?? 0) >= numPages,
+                      }
+
+                      void popupNativeContextMenu(buildFileMenuItems(fileActions, t))
+                        .then((chosen) => {
+                          if (chosen && pagesRef.current === targetFile.pages) {
+                            runFileMenuAction(chosen, fileActions)
+                          }
+                        })
+                        .catch((error: unknown) => {
+                          console.warn("Native file context menu failed:", error)
+                          if (pagesRef.current !== targetFile.pages) {
+                            return
+                          }
+                          setNativeFallbackPages(targetFile.pages)
+                          setMenu(null)
+                          setFileMenu(targetFile)
+                        })
+                      return
+                    }
+
+                    setFileMenu(targetFile)
+                    setMenu(null)
                     return
                   }
 
@@ -1432,6 +1500,66 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                   const pageNumber = Number(paper.dataset.thumbnailPage)
 
                   onMenuPage(pageNumber)
+
+                  if (macOS && !nativeFallback) {
+                    event.preventDefault()
+                    const pagesSnapshot = pages
+                    const effectivePages = selectedPages.has(pageNumber)
+                      ? [...selectedPages]
+                      : [pageNumber]
+                    let count = 0
+                    let first = Number.POSITIVE_INFINITY
+                    let last = Number.NEGATIVE_INFINITY
+
+                    for (const page of effectivePages) {
+                      count += 1
+                      first = Math.min(first, page)
+                      last = Math.max(last, page)
+                    }
+
+                    const pageActions: PageMenuActions = {
+                      canPaste,
+                      count,
+                      deleteDisabled: count >= numPages,
+                      onCopy: () => onCopyPages(effectivePages),
+                      onCut: () => onCutPages(effectivePages),
+                      onDelete: () => onDeletePage(pageNumber),
+                      onExtract: () =>
+                        onExtractPages(
+                          [...effectivePages].sort((left, right) => left - right),
+                        ),
+                      onInsertBlank: (side) =>
+                        onInsertBlankPage(
+                          side === "before" ? first : last + 1,
+                          pages[(side === "before" ? first : last) - 1]?.section,
+                        ),
+                      onPaste: (side) =>
+                        onPastePages(
+                          side === "before" ? first : last + 1,
+                          pages[(side === "before" ? first : last) - 1]?.section,
+                        ),
+                      onRotate: (degrees) =>
+                        onRotatePages(degrees, effectivePages, pagesSnapshot),
+                    }
+
+                    void popupNativeContextMenu(buildPageMenuItems(pageActions, t))
+                      .then((chosen) => {
+                        if (chosen && pagesRef.current === pagesSnapshot) {
+                          runPageMenuAction(chosen, pageActions)
+                        }
+                      })
+                      .catch((error: unknown) => {
+                        console.warn("Native page context menu failed:", error)
+                        if (pagesRef.current !== pagesSnapshot) {
+                          return
+                        }
+                        setNativeFallbackPages(pagesSnapshot)
+                        setFileMenu(null)
+                        setMenu({ pageNumber, pages: pagesSnapshot })
+                      })
+                    return
+                  }
+
                   setFileMenu(null)
                   setMenu({ pageNumber, pages })
                 }}
@@ -1610,7 +1738,11 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                   pages[(side === "before" ? menuFirst : menuLast) - 1]?.section,
                 )
               }
-              onRotate={onRotatePages}
+              onRotate={(degrees) => {
+                if (menu && pagesRef.current === menu.pages) {
+                  onRotatePages(degrees, menuPages, menu.pages)
+                }
+              }}
             />
           ) : menuFile !== null ? (
             <FileMenuContent

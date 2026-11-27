@@ -74,7 +74,10 @@ window-vibrancy = "0.8.1"
 windows-version = "0.1.7"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAppearance", "NSWindow"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAppearance", "NSPasteboard", "NSWindow"] }
+# Already in the tree under objc2-app-kit; named here so native clipboard writes
+# can pass NSString directly to NSPasteboard without WebKit gesture refusal.
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSString"] }
 
 [profile.dev.package.allsorts]
 opt-level = 3

@@ -21,7 +21,12 @@ import {
 import { FileTitleEditor } from "@/components/FileTitleEditor"
 import { HintTooltip } from "@/components/HintTooltip"
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
-import { FileMenuContent } from "@/components/PageContextMenu"
+import {
+  buildFileMenuItems,
+  FileMenuContent,
+  runFileMenuAction,
+  type FileMenuActions,
+} from "@/components/PageContextMenu"
 import { dropEdgeOrigin, SidebarDropEdge } from "@/components/SidebarFileDrop"
 import { OutlineBar } from "@/components/SidebarPanelTools"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
@@ -41,8 +46,10 @@ import {
   type OutlineFolds,
 } from "@/lib/outlineFolds"
 import { DRAG_CLICK_WINDOW, dropGapForRow } from "@/lib/pageDrag"
+import { popupNativeContextMenu } from "@/lib/nativeMenu"
 import { fileRuns, type FileRun } from "@/lib/pageSections"
 import type { PdfPageInfo, PdfSection } from "@/lib/pdf"
+import { isMacOS } from "@/lib/platform"
 import { cn } from "@/lib/utils"
 
 export type FileSectionsTreeHandle = {
@@ -354,6 +361,7 @@ function FileRunRow({
   section: PdfSection
 }) {
   const { t } = useTranslation()
+  const macOS = isMacOS()
   const nameRef = useRef<HTMLSpanElement>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   // The file's own bookmarks stand under its first run, as a Save As writes them.
@@ -370,8 +378,9 @@ function FileRunRow({
       style={offset ? { transform: `translateY(${offset}px)` } : undefined}
     >
       {/* Off while the name is typed: the field keeps the WebView's own cut,
-          copy and paste menu. */}
-      <ContextMenu disabled={editing} onOpenChange={setMenuOpen}>
+          copy and paste menu. Also off on macOS, where native NSMenu handles
+          right-clicks directly. */}
+      <ContextMenu disabled={macOS || editing} onOpenChange={setMenuOpen}>
         <ContextMenuTrigger
           render={
             <div
@@ -381,6 +390,33 @@ function FileRunRow({
               )}
               data-outline-current={active ? "" : undefined}
               data-slot="file-section-row"
+              onContextMenu={
+                macOS
+                  ? (event) => {
+                      if (editing) {
+                        return
+                      }
+
+                      event.preventDefault()
+                      const fileActions: FileMenuActions = {
+                        canPaste,
+                        onPaste: (end) =>
+                          onPaste(section.id, end === "start" ? run.first : run.first + run.count),
+                        onRemove: () => onRemove(section.id),
+                        onRename: () => onEdit(true),
+                        removeDisabled,
+                      }
+
+                      void popupNativeContextMenu(buildFileMenuItems(fileActions, t)).then(
+                        (chosen) => {
+                          if (chosen) {
+                            runFileMenuAction(chosen, fileActions)
+                          }
+                        },
+                      )
+                    }
+                  : undefined
+              }
             />
           }
         >
