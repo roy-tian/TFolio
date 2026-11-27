@@ -203,6 +203,19 @@ body {
   }
   body {
     @apply bg-background text-foreground;
+    /* Desktop UI chrome and non-text objects are not selectable by default,
+       leaving only PDF page text and editable fields selectable. */
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  input,
+  textarea,
+  [contenteditable] {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+  img {
+    -webkit-user-drag: none;
   }
   /* Children inherit the font list already resolved, not var(--font-script),
      so an element naming its own language must resolve the list again. */

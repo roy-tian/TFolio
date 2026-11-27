@@ -124,8 +124,7 @@ export function ViewerMenu({
       // in the view there is nothing for the entries to act on.
       open={shown !== null}
     >
-      {/* The trigger's own `select-none` would take the pages' text with it. */}
-      <ContextMenuTrigger className="select-auto" onContextMenu={open} render={viewer}>
+      <ContextMenuTrigger onContextMenu={open} render={viewer}>
         {children}
       </ContextMenuTrigger>
       {shown ? (
