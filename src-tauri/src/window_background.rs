@@ -1,4 +1,18 @@
+use serde::Serialize;
 use tauri::WebviewWindow;
+
+/// Native window material active beneath the WebView, named for the frontend's
+/// platform-specific surface rules (`data-native-material`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WorkspaceMaterial {
+    /// macOS Liquid Glass (or vibrancy fallback on older macOS).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    Glass,
+    /// Windows 11 DWM Mica (`DWMSBT_MAINWINDOW`).
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    Mica,
+}
 
 /// Only reveal the desktop after the native material has been installed.
 #[tauri::command]
@@ -6,7 +20,7 @@ pub async fn set_workspace_background(
     window: WebviewWindow,
     dark: bool,
     follow_system: bool,
-) -> Result<bool, String> {
+) -> Result<Option<WorkspaceMaterial>, String> {
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
         let (sender, mut receiver) = tauri::async_runtime::channel(1);
@@ -29,7 +43,7 @@ pub async fn set_workspace_background(
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = (window, dark, follow_system);
-        Ok(false)
+        Ok(None)
     }
 }
 
@@ -42,7 +56,7 @@ fn apply_background(
     window: &WebviewWindow,
     dark: bool,
     follow_system: bool,
-) -> Result<bool, String> {
+) -> Result<Option<WorkspaceMaterial>, String> {
     #[cfg(target_os = "windows")]
     {
         let theme = if follow_system {
@@ -54,21 +68,16 @@ fn apply_background(
         };
         window.set_theme(theme).map_err(|error| error.to_string())?;
 
-        // Without the system backdrop (Windows 10, Windows 11 21H2),
-        // window-vibrancy falls back to the undocumented accent API, whose
-        // acrylic lags every drag and resize; those windows stay opaque.
+        // Without the documented system backdrop (Windows 10, Windows 11 21H2),
+        // borderless windows avoid undocumented DWM attributes and stay opaque.
         if windows_version::OsVersion::current().build < SYSTEM_BACKDROP_BUILD {
-            return Ok(false);
+            return Ok(None);
         }
 
-        // Only the docked sidebar lets it through; a dense tint keeps the
-        // desktop behind it faint.
-        let tint = if dark {
-            (9, 9, 11, 245)
-        } else {
-            (244, 244, 245, 245)
-        };
-        window_vibrancy::apply_acrylic(window, Some(tint)).map_err(|error| error.to_string())?;
+        // Always pass the resolved dark flag so switching back to system theme
+        // updates DWMWA_USE_IMMERSIVE_DARK_MODE after a manual override.
+        window_vibrancy::apply_mica(window, Some(dark)).map_err(|error| error.to_string())?;
+        Ok(Some(WorkspaceMaterial::Mica))
     }
 
     #[cfg(target_os = "macos")]
@@ -118,7 +127,24 @@ fn apply_background(
             }
             Err(error) => return Err(error.to_string()),
         }
-    }
 
-    Ok(true)
+        Ok(Some(WorkspaceMaterial::Glass))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WorkspaceMaterial;
+
+    #[test]
+    fn serializes_workspace_material_names_for_frontend() {
+        assert_eq!(
+            serde_json::to_string(&WorkspaceMaterial::Glass).unwrap(),
+            "\"glass\""
+        );
+        assert_eq!(
+            serde_json::to_string(&WorkspaceMaterial::Mica).unwrap(),
+            "\"mica\""
+        );
+    }
 }

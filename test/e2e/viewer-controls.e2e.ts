@@ -1,7 +1,14 @@
 import { $, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
-import { clickAppMenuItem, minimalPdf, openPdfFromDisk, refreshApp, seedSettings } from "./helpers"
+import {
+  appMenuItem,
+  clickAppMenuItem,
+  minimalPdf,
+  openPdfFromDisk,
+  refreshApp,
+  seedSettings,
+} from "./helpers"
 import { calibratePointer, pointer } from "./nativePointer"
 
 const session = "[data-document-session][data-active='true']"
@@ -122,42 +129,119 @@ describe("TFolio viewer controls", () => {
     })
   })
 
-  // Windows and macOS let the desktop through the docked sidebar; a modal's
-  // blurred copy of it would be as see-through, leaving its words sharp.
-  it("makes the see-through sidebar solid under a modal", async () => {
-    const sidebar = "[data-slot='app-sidebar']"
-    // As the opaque sidebar would paint, and how the see-through one compares.
-    const ground = () =>
-      browser.execute((css: string) => {
-        const aside = document.querySelector<HTMLElement>(`${css}[data-sidebar-mode='docked']`)!
-        const probe = document.createElement("div")
-        probe.style.backgroundColor = "var(--sidebar)"
-        document.body.append(probe)
-        const solid = getComputedStyle(probe).backgroundColor
-        probe.remove()
-        return getComputedStyle(aside).backgroundColor === solid
-      }, sidebar)
+  // macOS lets Liquid Glass through the docked sidebar alone, while Windows 11
+  // layers Mica across the window with distinct surface tints and acrylic menus;
+  // in both modes a modal turns translucent surfaces solid so its blurred copy
+  // never leaves sharp UI words showing through.
+  it("layers native materials per platform and turns them solid under a modal", async () => {
+    const isSolid = (selector: string, token: string) =>
+      browser.execute(
+        (css: string, cssVar: string) => {
+          const element = document.querySelector<HTMLElement>(css)
+          if (!element) return false
+          const probe = document.createElement("div")
+          probe.style.backgroundColor = `var(${cssVar})`
+          document.body.append(probe)
+          const solid = getComputedStyle(probe).backgroundColor
+          probe.remove()
+          return getComputedStyle(element).backgroundColor === solid
+        },
+        selector,
+        token,
+      )
 
-    await browser.execute(() => document.documentElement.classList.add("native-workspace"))
+    const dockedSidebar = `${session} [data-slot='app-sidebar'][data-sidebar-mode='docked']`
+    const toolbar = `${session} [data-slot='toolbar']`
+    const workspace = `${session} .workspace-background`
+
+    // macOS Liquid Glass: only the docked sidebar lets the desktop through.
+    await browser.execute(() => {
+      document.documentElement.classList.add("native-workspace")
+      document.documentElement.dataset.nativeMaterial = "glass"
+    })
     try {
-      await browser.waitUntil(async () => !(await ground()), {
-        timeoutMsg: "the docked sidebar never let the desktop through",
+      await browser.waitUntil(async () => !(await isSolid(dockedSidebar, "--sidebar")), {
+        timeoutMsg: "the docked sidebar never let the desktop through in glass mode",
       })
+      expect(await isSolid(toolbar, "--background")).toBe(true)
+      expect(await isSolid(workspace, "--workspace-background")).toBe(true)
 
       await clickAppMenuItem("settings")
       await $("[data-slot='dialog-content']").waitForDisplayed({ timeout: 15_000 })
-      await browser.waitUntil(ground, { timeoutMsg: "the sidebar stayed see-through under the modal" })
+      await browser.waitUntil(() => isSolid(dockedSidebar, "--sidebar"), {
+        timeoutMsg: "the glass sidebar stayed see-through under the modal",
+      })
 
       await browser.keys("Escape")
       await $("[data-slot='dialog-content']").waitForDisplayed({ reverse: true, timeout: 15_000 })
-      await browser.waitUntil(async () => !(await ground()), {
-        timeoutMsg: "the sidebar stayed solid once the modal went",
+      await browser.waitUntil(async () => !(await isSolid(dockedSidebar, "--sidebar")), {
+        timeoutMsg: "the glass sidebar stayed solid once the modal went",
       })
       expect(
         await browser.execute(() => "modalOpen" in document.documentElement.dataset),
       ).toBe(false)
+
+      // Windows 11 Mica: sidebar, chrome, and workspace layer distinct tints
+      // over Mica, turn solid under a modal, and menus render with acrylic blur.
+      await browser.execute(() => {
+        document.documentElement.dataset.nativeMaterial = "mica"
+      })
+      await browser.waitUntil(
+        async () =>
+          !(await isSolid(dockedSidebar, "--sidebar")) &&
+          !(await isSolid(toolbar, "--background")) &&
+          !(await isSolid(workspace, "--workspace-background")),
+        { timeoutMsg: "Mica surfaces never became translucent" },
+      )
+
+      const distinctGrounds = await browser.execute(
+        (sidebarCss: string, workspaceCss: string) => {
+          const sidebarColor = getComputedStyle(document.querySelector(sidebarCss)!).backgroundColor
+          const workspaceColor = getComputedStyle(
+            document.querySelector(workspaceCss)!,
+          ).backgroundColor
+          return sidebarColor !== workspaceColor
+        },
+        dockedSidebar,
+        workspace,
+      )
+      expect(distinctGrounds).toBe(true)
+
+      const settingsItem = await appMenuItem("settings")
+      const menuHasBlur = await browser.execute(() => {
+        const menu = document.querySelector<HTMLElement>("[data-slot='dropdown-menu-content']")
+        if (!menu) return false
+        const style = getComputedStyle(menu)
+        const filter =
+          style.getPropertyValue("backdrop-filter") ||
+          style.getPropertyValue("-webkit-backdrop-filter")
+        return filter.includes("blur(")
+      })
+      expect(menuHasBlur).toBe(true)
+
+      await settingsItem.click()
+      await $("[data-slot='dialog-content']").waitForDisplayed({ timeout: 15_000 })
+      await browser.waitUntil(
+        async () =>
+          (await isSolid(dockedSidebar, "--sidebar")) &&
+          (await isSolid(toolbar, "--background")) &&
+          (await isSolid(workspace, "--workspace-background")),
+        { timeoutMsg: "Mica surfaces stayed see-through under the modal" },
+      )
+
+      await browser.keys("Escape")
+      await $("[data-slot='dialog-content']").waitForDisplayed({ reverse: true, timeout: 15_000 })
+      await browser.waitUntil(
+        async () =>
+          !(await isSolid(dockedSidebar, "--sidebar")) &&
+          !(await isSolid(workspace, "--workspace-background")),
+        { timeoutMsg: "Mica surfaces stayed solid once the modal went" },
+      )
     } finally {
-      await browser.execute(() => document.documentElement.classList.remove("native-workspace"))
+      await browser.execute(() => {
+        document.documentElement.classList.remove("native-workspace")
+        delete document.documentElement.dataset.nativeMaterial
+      })
     }
   })
 })

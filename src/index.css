@@ -273,26 +273,138 @@ body {
   background-color: var(--workspace-background);
 }
 
-/* Native materials sit beneath the WebView and show only through the docked
-   sidebar: every other surface paints over them, an overlaid sidebar too, which
-   lies over pages rather than over the desktop. */
+/* Native materials sit beneath the WebView:
+   - macOS (`glass`, default for `.native-workspace`): Liquid Glass / vibrancy
+     shows only through the docked sidebar so toolbar controls and the reading
+     canvas stay crisp and free of desktop bleed.
+   - Windows 11 (`mica`): DWM Mica paints a calm wallpaper-only base across the
+     whole window, while distinct surface tints separate the navigation sidebar,
+     chrome bars, and reading canvas without distracting from pages. */
 .native-workspace,
 .native-workspace body,
 .native-workspace .app-surface {
   background-color: transparent;
 }
 
+/* Alpha-blended accents hold steady contrast over any wallpaper tint. */
+.native-workspace {
+  --sidebar-accent: oklch(0 0 0 / 6%);
+  --sidebar-border: oklch(0 0 0 / 9%);
+  --glass-popover-mix: 86%;
+  --native-menu-accent: oklch(0 0 0 / 6%);
+}
+
+.native-workspace.dark {
+  --sidebar-accent: oklch(1 0 0 / 9%);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --glass-popover-mix: 84%;
+  --native-menu-accent: oklch(1 0 0 / 10%);
+}
+
+.native-workspace[data-native-material="mica"] {
+  --mica-sidebar-mix: 18%;
+  --mica-chrome-mix: 62%;
+  --mica-tabs-mix: 42%;
+  --mica-workspace-mix: 80%;
+  --acrylic-popover-mix: 78%;
+  --acrylic-blur: 24px;
+  --acrylic-saturate: 1.5;
+  --acrylic-shadow: 0 8px 24px -4px rgb(0 0 0 / 0.14), 0 2px 6px -1px rgb(0 0 0 / 0.08);
+}
+
+.native-workspace.dark[data-native-material="mica"] {
+  --mica-sidebar-mix: 16%;
+  --mica-chrome-mix: 52%;
+  --mica-tabs-mix: 40%;
+  --mica-workspace-mix: 82%;
+  --acrylic-popover-mix: 76%;
+  --acrylic-blur: 28px;
+  --acrylic-saturate: 1.6;
+  --acrylic-shadow: 0 10px 28px -4px rgb(0 0 0 / 0.45), 0 2px 8px -1px rgb(0 0 0 / 0.3);
+}
+
+/* macOS Liquid Glass / vibrancy (also the default when `.native-workspace` is
+   set alone): only the docked sidebar lets the desktop material through. */
 .native-workspace .app-sidebar[data-sidebar-mode="docked"] {
-  background-color: color-mix(in oklab, var(--sidebar) 45%, transparent);
+  background-color: color-mix(in oklab, var(--sidebar) 48%, transparent);
   /* The modal backdrop's fade. */
   transition: background-color 100ms;
 }
 
+/* Windows 11 Mica: unified backdrop across the window with restrained,
+   distinct tints for the sidebar rail, chrome bars, and reading desk. */
+.native-workspace[data-native-material="mica"] .app-sidebar[data-sidebar-mode="docked"] {
+  background-color: color-mix(in oklab, var(--sidebar) var(--mica-sidebar-mix), transparent);
+}
+
+.native-workspace[data-native-material="mica"] [data-slot="toolbar"],
+.native-workspace[data-native-material="mica"] [data-slot="status-bar"] {
+  background-color: color-mix(in oklab, var(--background) var(--mica-chrome-mix), transparent);
+  transition: background-color 100ms;
+}
+
+.native-workspace[data-native-material="mica"] [data-tab-strip] {
+  background-color: color-mix(in oklab, var(--muted) var(--mica-tabs-mix), transparent);
+  transition: background-color 100ms;
+}
+
+.native-workspace[data-native-material="mica"] .workspace-background {
+  background-color: color-mix(
+    in oklab,
+    var(--workspace-background) var(--mica-workspace-mix),
+    transparent
+  );
+  transition: background-color 100ms;
+}
+
 /* A modal's backdrop blurs a copy of what lies beneath and draws it over the
-   original; over the desktop that copy is as see-through as the sidebar, and
-   the sidebar's sharp words would show through it. */
+   original; over native materials that copy is as see-through as the surface,
+   leaving sharp UI words visible through the blur. */
 .native-workspace[data-modal-open] .app-sidebar[data-sidebar-mode="docked"] {
   background-color: var(--sidebar);
+}
+
+.native-workspace[data-native-material="mica"][data-modal-open] [data-slot="toolbar"],
+.native-workspace[data-native-material="mica"][data-modal-open] [data-slot="status-bar"] {
+  background-color: var(--background);
+}
+
+.native-workspace[data-native-material="mica"][data-modal-open] [data-tab-strip] {
+  background-color: var(--muted);
+}
+
+.native-workspace[data-native-material="mica"][data-modal-open] .workspace-background {
+  background-color: var(--workspace-background);
+}
+
+/* Transient menus and popovers:
+   - Windows 11 (`mica`): Fluent-style in-app acrylic blur over app content.
+   - macOS (`glass`): subtle frosted tint for in-WebView popups so they
+     harmonize with AppKit's native menus while staying crisp over PDF text. */
+@supports (backdrop-filter: blur(1px)) {
+  .native-workspace[data-native-material="mica"] [data-slot="dropdown-menu-content"],
+  .native-workspace[data-native-material="mica"] [data-slot="dropdown-menu-sub-content"],
+  .native-workspace[data-native-material="mica"] [data-slot="context-menu-content"],
+  .native-workspace[data-native-material="mica"] [data-slot="context-menu-sub-content"],
+  .native-workspace[data-native-material="mica"] [data-slot="popover-content"],
+  .native-workspace[data-native-material="mica"] [data-slot="select-content"] {
+    --accent: var(--native-menu-accent);
+    background-color: color-mix(in oklab, var(--popover) var(--acrylic-popover-mix), transparent);
+    backdrop-filter: blur(var(--acrylic-blur)) saturate(var(--acrylic-saturate));
+    box-shadow: var(--acrylic-shadow);
+  }
+
+  .native-workspace[data-native-material="glass"] [data-slot="dropdown-menu-content"],
+  .native-workspace[data-native-material="glass"] [data-slot="dropdown-menu-sub-content"],
+  .native-workspace[data-native-material="glass"] [data-slot="context-menu-content"],
+  .native-workspace[data-native-material="glass"] [data-slot="context-menu-sub-content"],
+  .native-workspace[data-native-material="glass"] [data-slot="popover-content"],
+  .native-workspace[data-native-material="glass"] [data-slot="select-content"] {
+    --accent: var(--native-menu-accent);
+    background-color: color-mix(in oklab, var(--popover) var(--glass-popover-mix), transparent);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    backdrop-filter: blur(20px) saturate(1.4);
+  }
 }
 
 /* Printing is not offered; hide app chrome if an OS or WebView path still
