@@ -162,7 +162,8 @@ function TabListMenu({
       checked: tab.id === activeId,
       id: String(tab.id),
       kind: "item",
-      label: tab.name,
+      // AppKit's item has no room for the WebView list's dot.
+      label: tab.dirty ? `• ${tab.name}` : tab.name,
     })),
   }))
 
