@@ -100,6 +100,7 @@ function DraftBookmarkRow({
 }
 
 type BookmarkItemsProps = {
+  busy?: boolean
   draft?: DraftBookmark | null
   editingKey?: string | null
   folds: OutlineFolds
@@ -182,6 +183,7 @@ type BookmarkRowProps = Omit<BookmarkItemsProps, "items" | "parentPath"> & {
 }
 
 const BookmarkRow = memo(function BookmarkRow({
+  busy = false,
   draft = null,
   editingKey = null,
   folds,
@@ -207,6 +209,7 @@ const BookmarkRow = memo(function BookmarkRow({
   const nested = item.items.length > 0
   const open = nested && !folds.has(itemKey)
   const isEditing = editingKey === itemKey
+  const busyLabel = t("annotate.historyBusy")
   const renameLabel = t("bookmarks.rename", { name: title })
   const deleteLabel = t("bookmarks.delete", { name: title })
 
@@ -266,7 +269,7 @@ const BookmarkRow = memo(function BookmarkRow({
                 )}
                 disabled={!item.pageNumber}
                 onClick={() => item.pageNumber && onNavigate(item.pageNumber)}
-                onDoubleClick={onRename ? () => onEdit?.(itemKey) : undefined}
+                onDoubleClick={onRename && !busy ? () => onEdit?.(itemKey) : undefined}
                 type="button"
               >
                 <Bookmark
@@ -281,10 +284,11 @@ const BookmarkRow = memo(function BookmarkRow({
                 data-slot="bookmark-tools"
               >
                 {onRename ? (
-                  <HintTooltip label={renameLabel}>
+                  <HintTooltip label={busy ? busyLabel : renameLabel}>
                     <Button
                       aria-label={renameLabel}
                       data-slot="bookmark-rename"
+                      disabled={busy}
                       onClick={() => onEdit?.(itemKey)}
                       size="icon-xs"
                       variant="ghost"
@@ -294,11 +298,12 @@ const BookmarkRow = memo(function BookmarkRow({
                   </HintTooltip>
                 ) : null}
                 {onDelete ? (
-                  <HintTooltip label={deleteLabel}>
+                  <HintTooltip label={busy ? busyLabel : deleteLabel}>
                     <Button
                       aria-label={deleteLabel}
                       className="not-disabled:hover:text-destructive"
                       data-slot="bookmark-delete"
+                      disabled={busy}
                       onClick={() => onDelete(itemPath, parentKey, index)}
                       size="icon-xs"
                       variant="ghost"
@@ -315,6 +320,7 @@ const BookmarkRow = memo(function BookmarkRow({
       {open ? (
         <ul className="pl-5">
           <BookmarkItems
+            busy={busy}
             draft={draft}
             editingKey={editingKey}
             folds={folds}
@@ -338,6 +344,7 @@ const BookmarkRow = memo(function BookmarkRow({
 
 type BookmarkListProps = {
   active: boolean
+  busy?: boolean
   currentPage: CurrentPage
   folds: OutlineFolds
   items: PdfOutlineItem[]
@@ -352,6 +359,7 @@ type BookmarkListProps = {
 
 export function BookmarkList({
   active,
+  busy = false,
   currentPage,
   folds,
   items,
@@ -376,15 +384,18 @@ export function BookmarkList({
   const draft = draftState && draftState.items === items ? draftState : null
   const setEditingKey = useCallback(
     (key: string | null) => {
+      if (key !== null && busy) {
+        return
+      }
       if (key !== null) {
         setDraftState(null)
       }
       setEditing(key === null ? null : { items, key })
     },
-    [items],
+    [busy, items],
   )
   const startAdd = useCallback(() => {
-    if (!onAddBookmark || draft !== null) {
+    if (busy || !onAddBookmark || draft !== null) {
       return
     }
 
@@ -398,7 +409,7 @@ export function BookmarkList({
 
     setEditing(null)
     setDraftState({ items, pageNumber, path })
-  }, [currentPage, draft, folds, items, onAddBookmark, onFoldsChange, rootKey])
+  }, [busy, currentPage, draft, folds, items, onAddBookmark, onFoldsChange, rootKey])
   const commitDraft = useCallback(
     (title: string | null) => {
       const current = draft
@@ -453,7 +464,13 @@ export function BookmarkList({
       <OutlineBar
         add={
           onAddBookmark
-            ? { active: draft !== null, label: t("bookmarks.add"), onAdd: startAdd }
+            ? {
+                active: draft !== null,
+                disabled: busy,
+                disabledLabel: t("annotate.historyBusy"),
+                label: t("bookmarks.add"),
+                onAdd: startAdd,
+              }
             : undefined
         }
         fold={{
@@ -478,6 +495,7 @@ export function BookmarkList({
             <ul>
               <OutlineActiveContext.Provider value={outlineActive}>
                 <BookmarkItems
+                  busy={busy}
                   draft={draft}
                   editingKey={editingKey}
                   folds={folds}

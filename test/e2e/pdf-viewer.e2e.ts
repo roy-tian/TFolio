@@ -1,6 +1,7 @@
 import { $, $$, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
+import type { E2eOverrides } from "../../src/lib/e2e"
 import {
   activeSidebar,
   clickAppMenuItem,
@@ -16,6 +17,7 @@ import {
   seedSettings,
   switchSidebarPanel,
   textPdf,
+  tooltipOn,
 } from "./helpers"
 import { calibratePointer, pointer } from "./nativePointer"
 
@@ -530,6 +532,75 @@ describe("TFolio PDF viewer", () => {
     await expect(bookmarks.$("button=Key findings")).not.toBeExisting()
     await pressRedo()
     await bookmarks.$("button=Key findings").waitForDisplayed()
+
+    // While an operation holds the tab's queue, bookmark editing controls are
+    // greyed out with a reason tooltip and double-click rename is blocked.
+    await browser.execute(() => {
+      const page = window as Window & {
+        __finishSaveAs?: () => void
+        __tfolioE2E?: E2eOverrides
+      }
+
+      page.__tfolioE2E = {
+        ...page.__tfolioE2E,
+        exportPdf: () =>
+          new Promise((resolve) => {
+            page.__finishSaveAs = () => resolve(null)
+          }),
+      }
+    })
+    await clickAppMenuItem("save-as")
+    await browser.waitUntil(
+      () =>
+        browser.execute(
+          () =>
+            typeof (window as Window & { __finishSaveAs?: unknown }).__finishSaveAs === "function",
+        ),
+      { timeoutMsg: "the Save As holding the queue never started" },
+    )
+
+    const busyControls = [
+      `${activeSidebar} [data-slot='sidebar-add-bookmark']`,
+      `${activeSidebar} nav[aria-label='Bookmarks'] [data-slot='bookmark-rename']`,
+      `${activeSidebar} nav[aria-label='Bookmarks'] [data-slot='bookmark-delete']`,
+    ]
+
+    try {
+      for (const selector of busyControls) {
+        await expect($(selector)).toBeDisabled()
+        expect(
+          await browser.execute(
+            (css: string) => getComputedStyle(document.querySelector(css)!).cursor,
+            selector,
+          ),
+        ).toBe("not-allowed")
+        expect(await tooltipOn(selector)).toBe("Wait for the current edit to finish")
+      }
+
+      await browser.execute((css: string) => {
+        document
+          .querySelector<HTMLElement>(css)!
+          .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))
+      }, `${activeSidebar} nav[aria-label='Bookmarks'] [data-slot='bookmark-row'] button`)
+      await expect(draftInput()).not.toBeExisting()
+    } finally {
+      await browser.execute(() => {
+        const page = window as Window & {
+          __finishSaveAs?: () => void
+          __tfolioE2E?: E2eOverrides
+        }
+
+        page.__finishSaveAs?.()
+        delete page.__finishSaveAs
+        if (page.__tfolioE2E) {
+          delete page.__tfolioE2E.exportPdf
+        }
+      })
+    }
+
+    for (const selector of busyControls) {
+      await expect($(selector)).toBeEnabled()
+    }
   })
 
   it("turns whole pages and spreads with Page Up and Page Down at any zoom", async () => {

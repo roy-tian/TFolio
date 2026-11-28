@@ -98,6 +98,11 @@ export function HintTooltip({
     return children
   }
 
+  // React drops synthetic `onMouseMove` on disabled native controls, which
+  // Base UI's delayed tooltips rely on; `delay={0}` uses native `mouseenter`
+  // so greyed controls still explain why they cannot act.
+  const triggerDelay = (children.props as { disabled?: boolean }).disabled ? 0 : undefined
+
   // Only a plain hint can share: the others decide per opening, or need their
   // own root so disabling closes an open popup without remounting the trigger.
   // A trigger takes its delay from the provider around it, as a hint of its
@@ -105,6 +110,7 @@ export function HintTooltip({
   if (shared && !cutShort && disabled === undefined && openOnFocus && !trackCursorAxis) {
     const trigger = (
       <TooltipTrigger
+        delay={triggerDelay}
         handle={shared}
         payload={{ label, side, sideOffset }}
         render={children}
@@ -133,7 +139,7 @@ export function HintTooltip({
       }}
       trackCursorAxis={trackCursorAxis}
     >
-      <TooltipTrigger render={children} />
+      <TooltipTrigger delay={triggerDelay} render={children} />
       <TooltipContent side={side} sideOffset={sideOffset}>
         {label}
       </TooltipContent>

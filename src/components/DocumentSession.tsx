@@ -2514,6 +2514,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           {sidebarPanel === "bookmarks" && severalFiles ? (
             <FileSectionsTree
               active={active}
+              busy={annotations.isBusy}
               canPaste={canPastePages}
               currentPage={currentPage}
               folds={outlineFolds}
@@ -2539,6 +2540,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           ) : sidebarPanel === "bookmarks" ? (
             <BookmarkList
               active={active}
+              busy={annotations.isBusy}
               currentPage={currentPage}
               folds={outlineFolds}
               items={outline}

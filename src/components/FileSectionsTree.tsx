@@ -70,6 +70,7 @@ export type FileSectionsTreeHandle = {
 
 type FileSectionsTreeProps = {
   active: boolean
+  busy?: boolean
   canPaste: boolean
   currentPage: CurrentPage
   /** The files folded to their names, and their bookmarks folded, by key. */
@@ -131,6 +132,7 @@ function runLanding(list: HTMLUListElement, y: number | null) {
  */
 export function FileSectionsTree({
   active,
+  busy = false,
   canPaste,
   currentPage,
   folds,
@@ -198,7 +200,7 @@ export function FileSectionsTree({
     [sections],
   )
   const startAdd = useCallback(() => {
-    if (draft !== null) {
+    if (busy || draft !== null) {
       return
     }
 
@@ -224,7 +226,7 @@ export function FileSectionsTree({
 
     setEditingState(null)
     setDraftState({ pageNumber, pages, path, sectionId, sections })
-  }, [currentPage, draft, files, folds, onFoldsChange, pages, sections])
+  }, [busy, currentPage, draft, files, folds, onFoldsChange, pages, sections])
   const commitDraft = useCallback(
     (title: string | null) => {
       const current = draft
@@ -306,7 +308,13 @@ export function FileSectionsTree({
   return (
     <div className="flex h-full flex-col">
       <OutlineBar
-        add={{ active: draft !== null, label: t("bookmarks.add"), onAdd: startAdd }}
+        add={{
+          active: draft !== null,
+          disabled: busy,
+          disabledLabel: t("annotate.historyBusy"),
+          label: t("bookmarks.add"),
+          onAdd: startAdd,
+        }}
         fold={{
           canFold: foldAll.canFold,
           canUnfold: foldAll.canUnfold,
@@ -335,6 +343,7 @@ export function FileSectionsTree({
                 <FileRunRow
                   active={activeFileKey === rowKey}
                   bookmarksActive={bookmarksActive}
+                  busy={busy}
                   canPaste={canPaste}
                   draft={run.leads && draft?.sectionId === section.id ? draft : null}
                   dragging={drag !== null}
@@ -400,6 +409,7 @@ const NO_BOOKMARKS: PdfSection["outline"] = []
 function FileRunRow({
   active,
   bookmarksActive,
+  busy,
   canPaste,
   draft,
   dragging,
@@ -429,6 +439,7 @@ function FileRunRow({
 }: {
   active: boolean
   bookmarksActive: OutlineActive
+  busy: boolean
   canPaste: boolean
   draft: DraftBookmark | null
   dragging: boolean
@@ -469,6 +480,15 @@ function FileRunRow({
     (path: number[], parentKey: string, bookmarkIndex: number) =>
       onDeleteBookmark(section.id, path, parentKey, bookmarkIndex),
     [onDeleteBookmark, section.id],
+  )
+  const editBookmark = useCallback(
+    (key: string | null) => {
+      if (key !== null && busy) {
+        return
+      }
+      onEditKey(key)
+    },
+    [busy, onEditKey],
   )
   const renameBookmark = useCallback(
     (path: number[], title: string, previous: string) =>
@@ -613,6 +633,7 @@ function FileRunRow({
         <ul className="pl-5">
           <OutlineActiveContext.Provider value={bookmarksActive}>
             <BookmarkItems
+              busy={busy}
               draft={draft}
               editingKey={editingKey}
               folds={folds}
@@ -620,7 +641,7 @@ function FileRunRow({
               navRef={navRef}
               onCommitDraft={onCommitDraft}
               onDelete={deleteBookmark}
-              onEdit={onEditKey}
+              onEdit={editBookmark}
               onFoldsChange={onFoldsChange}
               onNavigate={onNavigateBookmark}
               onRename={renameBookmark}
