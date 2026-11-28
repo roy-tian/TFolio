@@ -111,6 +111,7 @@ export function SidebarPanelSwitch({ panel }: { panel: SidebarPanel }) {
 
             return (
               <DropdownMenuRadioItem
+                closeOnClick
                 data-sidebar-panel={option.value}
                 key={option.value}
                 value={option.value}
