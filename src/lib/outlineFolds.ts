@@ -54,6 +54,156 @@ export function toggledFold(folds: OutlineFolds, key: string): OutlineFolds {
   return next
 }
 
+/** Fold key of the parent holding the bookmark at `path` under `rootKey`. */
+export function bookmarkParentKey(rootKey: string, path: readonly number[]) {
+  let key = rootKey
+
+  for (let index = 0; index < path.length - 1; index += 1) {
+    key = bookmarkFoldKey(key, path[index]!)
+  }
+
+  return key
+}
+
+/** Unfolds every ancestor bookmark (and enclosing file, if any) along `path`
+    so an inserted or drafted bookmark row is immediately visible. */
+export function unfoldBookmarkAncestors(
+  folds: OutlineFolds,
+  rootKey: string,
+  path: readonly number[],
+  sectionId?: number,
+): OutlineFolds {
+  const toRemove: string[] = []
+
+  if (sectionId !== undefined) {
+    const fileKey = fileFoldKey(sectionId)
+
+    if (folds.has(fileKey)) {
+      toRemove.push(fileKey)
+    }
+  }
+
+  let key = rootKey
+
+  for (let index = 0; index < path.length - 1; index += 1) {
+    key = bookmarkFoldKey(key, path[index]!)
+
+    if (folds.has(key)) {
+      toRemove.push(key)
+    }
+  }
+
+  if (toRemove.length === 0) {
+    return folds
+  }
+
+  const next = new Set(folds)
+
+  for (const entry of toRemove) {
+    next.delete(entry)
+  }
+
+  return next
+}
+
+/** Shifts sibling fold keys at or after `index` under `parentKey` up by one. */
+export function foldsAfterBookmarkInsert(
+  folds: OutlineFolds,
+  parentKey: string,
+  index: number,
+): OutlineFolds {
+  const prefix = `${parentKey}-`
+  let changed = false
+  const next = new Set<string>()
+
+  for (const key of folds) {
+    if (!key.startsWith(prefix)) {
+      next.add(key)
+      continue
+    }
+
+    const tail = key.slice(prefix.length)
+    const dash = tail.indexOf("-")
+    const segment = dash < 0 ? tail : tail.slice(0, dash)
+    const rest = dash < 0 ? "" : tail.slice(dash)
+
+    if (!/^\d+$/.test(segment)) {
+      next.add(key)
+      continue
+    }
+
+    const siblingIndex = Number(segment)
+
+    if (siblingIndex >= index) {
+      changed = true
+      next.add(`${prefix}${siblingIndex + 1}${rest}`)
+    } else {
+      next.add(key)
+    }
+  }
+
+  return changed ? next : folds
+}
+
+/**
+ * Where a new bookmark for `pageNumber` belongs in `items`: immediately after
+ * the active bookmark for `pageNumber` in reading order (as its first child
+ * when it has children — whose pages come after — otherwise as its next
+ * sibling). Before every valid bookmark it lands at `[0]`; when no bookmark
+ * carries a page number it appends at `[items.length]`.
+ */
+export function bookmarkInsertPath(
+  items: readonly PdfOutlineItem[],
+  pageNumber: number,
+): number[] {
+  let bestPage = -1
+  let bestPath: number[] | null = null
+  let bestItem: PdfOutlineItem | null = null
+  let crossedHigher = false
+  let hasAnyPage = false
+
+  const walk = (list: readonly PdfOutlineItem[], prefix: number[]) => {
+    for (let index = 0; index < list.length; index += 1) {
+      const item = list[index]!
+      const path = [...prefix, index]
+
+      if (item.pageNumber !== null) {
+        hasAnyPage = true
+
+        if (item.pageNumber > pageNumber) {
+          crossedHigher = true
+        } else if (
+          item.pageNumber > bestPage ||
+          (item.pageNumber === bestPage && !crossedHigher)
+        ) {
+          bestPage = item.pageNumber
+          bestPath = path
+          bestItem = item
+          crossedHigher = false
+        }
+      }
+
+      if (item.items.length > 0) {
+        walk(item.items, path)
+      }
+    }
+  }
+
+  walk(items, [])
+
+  if (bestPath === null || bestItem === null) {
+    return [hasAnyPage ? 0 : items.length]
+  }
+
+  if ((bestItem as PdfOutlineItem).items.length > 0) {
+    return [...(bestPath as number[]), 0]
+  }
+
+  const leafPath = bestPath as number[]
+
+  return [...leafPath.slice(0, -1), leafPath.at(-1)! + 1]
+}
+
 /** Drops fold keys for the deleted bookmark and its descendants, and shifts
     later sibling keys under `parentKey` down by one. */
 export function foldsAfterBookmarkDelete(

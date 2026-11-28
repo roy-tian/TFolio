@@ -137,4 +137,30 @@ describe("historyAction", () => {
       }),
     ).toEqual({ key: "annotate.actionPageNumbersRemove" })
   })
+
+  it("names bookmark additions, renames, and deletions", () => {
+    expect(
+      historyAction({
+        kind: "addBookmark",
+        pageNumber: 2,
+        path: [0],
+        title: "Page 2",
+      }),
+    ).toEqual({ key: "annotate.actionAddBookmark" })
+    expect(
+      historyAction({
+        kind: "renameBookmark",
+        path: [0],
+        previous: "Old",
+        title: "New",
+      }),
+    ).toEqual({ key: "annotate.actionRenameBookmark" })
+    expect(
+      historyAction({
+        kind: "deleteBookmark",
+        path: [0],
+        stashId: 1,
+      }),
+    ).toEqual({ key: "annotate.actionDeleteBookmark" })
+  })
 })

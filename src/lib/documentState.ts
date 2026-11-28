@@ -191,6 +191,7 @@ function apply(
       }
       return
     }
+    case "addBookmark":
     case "deleteBookmark":
       state.opaque = true
       return

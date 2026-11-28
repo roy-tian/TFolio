@@ -196,6 +196,15 @@ export type RenameSectionCommand = {
   title: string
 }
 
+/** A bookmark added to the document or one of its sections. */
+export type AddBookmarkCommand = {
+  kind: "addBookmark"
+  pageNumber: number
+  path: number[]
+  sectionId?: number
+  title: string
+}
+
 /** A bookmark's title in the document or in one of its sections. */
 export type RenameBookmarkCommand = {
   kind: "renameBookmark"
@@ -247,6 +256,7 @@ export type AnnotationCommand =
   | InsertPagesCommand
   | InsertFilesCommand
   | RenameSectionCommand
+  | AddBookmarkCommand
   | RenameBookmarkCommand
   | DeleteBookmarkCommand
   | FileOptionsCommand
@@ -382,6 +392,7 @@ export function commandPageChange(
       }
     // A name or a choice changes; every page stays where it is.
     case "renameSection":
+    case "addBookmark":
     case "renameBookmark":
     case "deleteBookmark":
     case "fileOptions":
@@ -421,6 +432,7 @@ export function commandPages(command: AnnotationCommand): number[] {
       // `pageCount` spans before and after, covering the apply and the undo alike.
       return pagesFrom(command.index, command.pageCount)
     case "renameSection":
+    case "addBookmark":
     case "renameBookmark":
     case "deleteBookmark":
     case "fileOptions":
@@ -446,6 +458,7 @@ export function movesPages(command: AnnotationCommand): boolean {
     case "insertFiles":
       return true
     case "renameSection":
+    case "addBookmark":
     case "renameBookmark":
     case "deleteBookmark":
     case "fileOptions":
@@ -800,6 +813,45 @@ export function planRenameSection(
   return { command, history: commit(history, command) }
 }
 
+/** Whether a reader-supplied bookmark can be added at `path` for `pageNumber`. */
+export function canAddBookmark(
+  path: number[],
+  pageNumber: number,
+  pageCount: number,
+  title: string,
+) {
+  return (
+    path.length > 0 &&
+    Number.isInteger(pageNumber) &&
+    pageNumber >= 1 &&
+    pageNumber <= pageCount &&
+    title.trim() !== ""
+  )
+}
+
+export function planAddBookmark(
+  history: AnnotationHistory,
+  path: number[],
+  pageNumber: number,
+  pageCount: number,
+  title: string,
+  sectionId?: number,
+) {
+  if (!canAddBookmark(path, pageNumber, pageCount, title)) {
+    return null
+  }
+
+  const command: AddBookmarkCommand = {
+    kind: "addBookmark",
+    pageNumber,
+    path,
+    ...(sectionId === undefined ? {} : { sectionId }),
+    title: title.trim(),
+  }
+
+  return { command, history: commit(history, command) }
+}
+
 /** Whether a reader-supplied bookmark title changes an existing non-empty entry. */
 export function canRenameBookmark(path: number[], title: string, previous: string) {
   const trimmed = title.trim()
@@ -914,6 +966,7 @@ function pageNumbersStale(history: AnnotationHistory): boolean {
 
     if (
       kind !== "renameSection" &&
+      kind !== "addBookmark" &&
       kind !== "renameBookmark" &&
       kind !== "deleteBookmark" &&
       kind !== "watermark"

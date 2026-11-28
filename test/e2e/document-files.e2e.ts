@@ -1344,5 +1344,16 @@ describe("TFolio blank pages between files", () => {
 
     await browser.keys(["Control", "z"])
     await files.$("button=Appendix section").waitForDisplayed()
+
+    // Add a bookmark for page 1 (which belongs to own.pdf, currently with no bookmarks).
+    await $(`${activeSidebar} [data-slot='sidebar-add-bookmark']`).click()
+    const addInput = $(`${activeSidebar} [data-slot='bookmark-title-input']`)
+    await addInput.waitForDisplayed()
+    await addInput.setValue("Own cover")
+    await browser.keys("Enter")
+    await files.$("button=Own cover").waitForDisplayed()
+
+    await browser.keys(["Control", "z"])
+    await expect(files.$("button=Own cover")).not.toBeExisting()
   })
 })

@@ -10,6 +10,7 @@ import {
   openPdfFromDisk,
   outlinedPdf,
   pageInk,
+  pressRedo,
   refreshApp,
   renderedPage,
   seedSettings,
@@ -463,6 +464,72 @@ describe("TFolio PDF viewer", () => {
     // Undo the rename too, then verify clean state.
     await browser.keys(["Control", "z"])
     await bookmarks.$("button=Part one").waitForDisplayed()
+  })
+
+  it("adds a bookmark at the current page from the outline bar, cancels on Escape, and supports undo/redo", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+    await openPdfFromDisk("add-bookmark.pdf", minimalPdf(3))
+    await $("[data-page-number='1']").waitForDisplayed()
+
+    await switchSidebarPanel("bookmarks")
+    const addButton = $(`${activeSidebar} [data-slot='sidebar-add-bookmark']`)
+    await addButton.waitForDisplayed()
+
+    // Placed immediately to the left of the fold/unfold button.
+    const [addRight, foldLeft] = await browser.execute(
+      (addCss: string, foldCss: string): [number, number] => [
+        document.querySelector<HTMLElement>(addCss)!.getBoundingClientRect().right,
+        document.querySelector<HTMLElement>(foldCss)!.getBoundingClientRect().left,
+      ],
+      `${activeSidebar} [data-slot='sidebar-add-bookmark']`,
+      `${activeSidebar} [data-slot='sidebar-fold-all']`,
+    )
+    expect(addRight).toBeLessThanOrEqual(foldLeft)
+
+    // Jump to page 2 and cancel a draft with Escape.
+    const pageInput = $("input[aria-label='Page number']")
+    await pageInput.setValue("2")
+    await browser.keys("Enter")
+    await browser.waitUntil(
+      async () => (await pageInput.getValue()) === "2",
+      { timeoutMsg: "never jumped to page 2" },
+    )
+
+    const draftInput = () => $(`${activeSidebar} [data-slot='bookmark-title-input']`)
+    await addButton.click()
+    await draftInput().waitForDisplayed()
+    await expect(draftInput()).toBeFocused()
+    expect(await draftInput().getValue()).toBe("Page 2")
+    await browser.keys("Escape")
+    await expect(draftInput()).not.toBeExisting()
+
+    // Add a named bookmark on page 2, verify navigation from page 1, then undo and redo.
+    const bookmarks = $(`${activeSidebar} nav[aria-label='Bookmarks']`)
+    await addButton.click()
+    const input = draftInput()
+    await input.waitForDisplayed()
+    await input.setValue("Key findings")
+    await browser.keys("Enter")
+    await bookmarks.$("button=Key findings").waitForDisplayed()
+
+    await pageInput.setValue("1")
+    await browser.keys("Enter")
+    await browser.waitUntil(
+      async () => (await pageInput.getValue()) === "1",
+      { timeoutMsg: "never jumped back to page 1" },
+    )
+
+    await bookmarks.$("button=Key findings").click()
+    await browser.waitUntil(
+      async () => (await pageInput.getValue()) === "2",
+      { timeoutMsg: "clicking added bookmark never jumped to page 2" },
+    )
+
+    await browser.keys(["Control", "z"])
+    await expect(bookmarks.$("button=Key findings")).not.toBeExisting()
+    await pressRedo()
+    await bookmarks.$("button=Key findings").waitForDisplayed()
   })
 
   it("turns whole pages and spreads with Page Up and Page Down at any zoom", async () => {

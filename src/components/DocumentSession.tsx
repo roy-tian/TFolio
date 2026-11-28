@@ -98,6 +98,7 @@ import { forgetDocumentText } from "@/lib/pageText"
 import { transientDocumentRefusals, workspaceOwner } from "@/lib/notices"
 import {
   foldsAfterBookmarkDelete,
+  foldsAfterBookmarkInsert,
   NO_FOLDS,
   sectionOutlineKey,
   type OutlineFolds,
@@ -1386,6 +1387,25 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       [annotations],
     )
 
+    const addBookmark = useCallback(
+      (
+        path: number[],
+        pageNumber: number,
+        title: string,
+        parentKey: string,
+        sectionId?: number,
+      ) => {
+        void annotations.addBookmark(path, pageNumber, title, sectionId).then((landed) => {
+          if (landed) {
+            setOutlineFolds((current) =>
+              foldsAfterBookmarkInsert(current, parentKey, path[path.length - 1]!),
+            )
+          }
+        })
+      },
+      [annotations],
+    )
+
     const renameBookmark = useCallback(
       (path: number[], title: string, previous: string, sectionId?: number) => {
         void annotations.renameBookmark(path, title, previous, sectionId)
@@ -2497,6 +2517,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               canPaste={canPastePages}
               currentPage={currentPage}
               folds={outlineFolds}
+              onAddBookmark={(sectionId, path, pageNumber, title, parentKey) =>
+                addBookmark(path, pageNumber, title, parentKey, sectionId)
+              }
               onDeleteBookmark={(sectionId, path, parentKey, index) =>
                 deleteBookmark(path, parentKey, index, sectionId)
               }
@@ -2519,6 +2542,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               currentPage={currentPage}
               folds={outlineFolds}
               items={outline}
+              onAddBookmark={(path, pageNumber, title, parentKey) =>
+                addBookmark(path, pageNumber, title, parentKey, outlineFile?.id)
+              }
               onDeleteBookmark={(path, parentKey, index) =>
                 deleteBookmark(path, parentKey, index, outlineFile?.id)
               }

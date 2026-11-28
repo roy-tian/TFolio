@@ -1,4 +1,13 @@
-import { memo, useCallback, useMemo, useRef, useState } from "react"
+import {
+  memo,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react"
 import { Bookmark, ChevronRight, Pencil, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
@@ -10,7 +19,7 @@ import { SidebarDropEdge } from "@/components/SidebarFileDrop"
 import { OutlineBar } from "@/components/SidebarPanelTools"
 import { Button } from "@/components/ui/button"
 import type { CurrentPage } from "@/hooks/useCurrentPage"
-import { useFollowOutlineRow } from "@/hooks/useFollowCurrentPage"
+import { scrollOutlineRowIntoView, useFollowOutlineRow } from "@/hooks/useFollowCurrentPage"
 import {
   OutlineActiveContext,
   useIsOutlineRowActive,
@@ -20,11 +29,14 @@ import {
 import {
   activeBookmarkKey,
   bookmarkFoldKey,
+  bookmarkInsertPath,
+  bookmarkParentKey,
   DOCUMENT_OUTLINE_KEY,
   foldableBookmarks,
   foldAllOf,
   nestsBookmarks,
   toggledFold,
+  unfoldBookmarkAncestors,
   type OutlineFolds,
 } from "@/lib/outlineFolds"
 import type { PdfOutlineItem } from "@/lib/pdf"
@@ -32,10 +44,68 @@ import { cn } from "@/lib/utils"
 
 const TOP_LEVEL: readonly number[] = []
 
+export type DraftBookmark = {
+  pageNumber: number
+  path: readonly number[]
+}
+
+function pathMatchesPrefix(path: readonly number[], prefix: readonly number[]) {
+  return prefix.every((segment, index) => path[index] === segment)
+}
+
+function DraftBookmarkRow({
+  navRef,
+  onDone,
+  pageNumber,
+  tree,
+}: {
+  navRef?: RefObject<HTMLElement | null>
+  onDone: (title: string | null) => void
+  pageNumber: number
+  tree: boolean
+}) {
+  const { t } = useTranslation()
+  const rowRef = useRef<HTMLDivElement>(null)
+
+  useLayoutEffect(() => {
+    const nav = navRef?.current
+    const row = rowRef.current
+
+    if (nav && row) {
+      scrollOutlineRowIntoView(nav, row, "instant")
+    }
+  }, [navRef])
+
+  return (
+    <li>
+      <div
+        className={cn(
+          "relative flex items-center rounded-md bg-sidebar-accent text-sidebar-accent-foreground",
+          tree && "gap-1",
+        )}
+        data-slot="bookmark-draft-row"
+        ref={rowRef}
+      >
+        {tree ? <span aria-hidden className="size-6 shrink-0" /> : null}
+        <FileTitleEditor
+          className={cn("mr-1", !tree && "ml-1")}
+          label={t("bookmarks.name")}
+          onDone={onDone}
+          slot="bookmark-title-input"
+          title={t("viewer.pageLabel", { pageNumber })}
+        />
+      </div>
+    </li>
+  )
+}
+
 type BookmarkItemsProps = {
+  draft?: DraftBookmark | null
   editingKey?: string | null
   folds: OutlineFolds
   items: PdfOutlineItem[]
+  navRef?: RefObject<HTMLElement | null>
+  onCommitDraft?: (title: string | null) => void
   onDelete?: (path: number[], parentKey: string, index: number) => void
   onEdit?: (key: string | null) => void
   onFoldsChange: (folds: OutlineFolds) => void
@@ -49,16 +119,60 @@ type BookmarkItemsProps = {
 
 /** The `li`s of one level, for a `ul` the caller owns. Which row stands for
     the page being read comes from `OutlineActiveContext`. */
-export function BookmarkItems({ items, parentPath = TOP_LEVEL, ...shared }: BookmarkItemsProps) {
-  return items.map((item, index) => (
-    <BookmarkRow
-      {...shared}
-      index={index}
-      item={item}
-      key={bookmarkFoldKey(shared.parentKey, index)}
-      parentPath={parentPath}
-    />
-  ))
+export function BookmarkItems({
+  draft = null,
+  items,
+  navRef,
+  onCommitDraft,
+  parentPath = TOP_LEVEL,
+  ...shared
+}: BookmarkItemsProps) {
+  const draftHere =
+    draft !== null &&
+    draft.path.length === parentPath.length + 1 &&
+    pathMatchesPrefix(draft.path, parentPath)
+      ? draft.path[parentPath.length]!
+      : null
+  const draftBelow =
+    draft !== null &&
+    draft.path.length > parentPath.length + 1 &&
+    pathMatchesPrefix(draft.path, parentPath)
+      ? draft
+      : null
+  const rows: ReactNode[] = []
+
+  for (let index = 0; index <= items.length; index += 1) {
+    if (draftHere === index && draft !== null && onCommitDraft) {
+      rows.push(
+        <DraftBookmarkRow
+          key={`draft-${shared.parentKey}-${index}`}
+          navRef={navRef}
+          onDone={onCommitDraft}
+          pageNumber={draft.pageNumber}
+          tree={shared.tree}
+        />,
+      )
+    }
+
+    const item = items[index]
+
+    if (item !== undefined) {
+      rows.push(
+        <BookmarkRow
+          {...shared}
+          draft={draftBelow && draftBelow.path[parentPath.length] === index ? draftBelow : null}
+          index={index}
+          item={item}
+          key={bookmarkFoldKey(shared.parentKey, index)}
+          navRef={navRef}
+          onCommitDraft={onCommitDraft}
+          parentPath={parentPath}
+        />,
+      )
+    }
+  }
+
+  return rows
 }
 
 type BookmarkRowProps = Omit<BookmarkItemsProps, "items" | "parentPath"> & {
@@ -68,10 +182,13 @@ type BookmarkRowProps = Omit<BookmarkItemsProps, "items" | "parentPath"> & {
 }
 
 const BookmarkRow = memo(function BookmarkRow({
+  draft = null,
   editingKey = null,
   folds,
   index,
   item,
+  navRef,
+  onCommitDraft,
   onDelete,
   onEdit,
   onFoldsChange,
@@ -198,9 +315,12 @@ const BookmarkRow = memo(function BookmarkRow({
       {open ? (
         <ul className="pl-5">
           <BookmarkItems
+            draft={draft}
             editingKey={editingKey}
             folds={folds}
             items={item.items}
+            navRef={navRef}
+            onCommitDraft={onCommitDraft}
             onDelete={onDelete}
             onEdit={onEdit}
             onFoldsChange={onFoldsChange}
@@ -221,6 +341,7 @@ type BookmarkListProps = {
   currentPage: CurrentPage
   folds: OutlineFolds
   items: PdfOutlineItem[]
+  onAddBookmark?: (path: number[], pageNumber: number, title: string, parentKey: string) => void
   onDeleteBookmark?: (path: number[], parentKey: string, index: number) => void
   onFoldsChange: (folds: OutlineFolds) => void
   onNavigate: (pageNumber: number) => void
@@ -234,6 +355,7 @@ export function BookmarkList({
   currentPage,
   folds,
   items,
+  onAddBookmark,
   onDeleteBookmark,
   onFoldsChange,
   onNavigate,
@@ -243,12 +365,58 @@ export function BookmarkList({
   const { t } = useTranslation()
   const navRef = useRef<HTMLElement>(null)
   const [editing, setEditing] = useState<{ items: PdfOutlineItem[]; key: string } | null>(null)
-  // Drop any in-flight title edit as soon as `items` updates underneath it so
-  // an index-keyed editor can never commit against a shifted sibling bookmark.
+  const [draftState, setDraftState] = useState<{
+    items: PdfOutlineItem[]
+    pageNumber: number
+    path: number[]
+  } | null>(null)
+  // Drop any in-flight title edit or add draft as soon as `items` updates
+  // underneath it so an index-keyed editor can never commit against shifted items.
   const editingKey = editing && editing.items === items ? editing.key : null
+  const draft = draftState && draftState.items === items ? draftState : null
   const setEditingKey = useCallback(
-    (key: string | null) => setEditing(key === null ? null : { items, key }),
+    (key: string | null) => {
+      if (key !== null) {
+        setDraftState(null)
+      }
+      setEditing(key === null ? null : { items, key })
+    },
     [items],
+  )
+  const startAdd = useCallback(() => {
+    if (!onAddBookmark || draft !== null) {
+      return
+    }
+
+    const pageNumber = currentPage.get()
+    const path = bookmarkInsertPath(items, pageNumber)
+    const unfolded = unfoldBookmarkAncestors(folds, rootKey, path)
+
+    if (unfolded !== folds) {
+      onFoldsChange(unfolded)
+    }
+
+    setEditing(null)
+    setDraftState({ items, pageNumber, path })
+  }, [currentPage, draft, folds, items, onAddBookmark, onFoldsChange, rootKey])
+  const commitDraft = useCallback(
+    (title: string | null) => {
+      const current = draft
+
+      setDraftState(null)
+
+      if (!current || !onAddBookmark || title === null || title.trim() === "") {
+        return
+      }
+
+      onAddBookmark(
+        current.path,
+        current.pageNumber,
+        title.trim(),
+        bookmarkParentKey(rootKey, current.path),
+      )
+    },
+    [draft, onAddBookmark, rootKey],
   )
   const keyForPage = useCallback(
     (pageNumber: number) =>
@@ -276,13 +444,18 @@ export function BookmarkList({
     currentPage,
     keyForPage,
     navRef,
-    paused: editingKey !== null,
+    paused: editingKey !== null || draft !== null,
   })
 
   return (
     <div className="flex h-full flex-col">
       {/* Files have no place among the bookmarks: they go last. */}
       <OutlineBar
+        add={
+          onAddBookmark
+            ? { active: draft !== null, label: t("bookmarks.add"), onAdd: startAdd }
+            : undefined
+        }
         fold={{
           canFold: foldAll.canFold,
           canUnfold: foldAll.canUnfold,
@@ -299,15 +472,18 @@ export function BookmarkList({
         >
           {/* The panel is the reader's choice of what the sidebar shows,
               whatever the document holds: one with none says so. */}
-          {items.length === 0 ? (
+          {items.length === 0 && draft === null ? (
             <p className="px-2 py-3 text-sm text-muted-foreground">{t("sidebar.noBookmarks")}</p>
           ) : (
             <ul>
               <OutlineActiveContext.Provider value={outlineActive}>
                 <BookmarkItems
+                  draft={draft}
                   editingKey={editingKey}
                   folds={folds}
                   items={items}
+                  navRef={navRef}
+                  onCommitDraft={commitDraft}
                   onDelete={onDeleteBookmark}
                   onEdit={setEditingKey}
                   onFoldsChange={onFoldsChange}
