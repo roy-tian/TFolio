@@ -11,6 +11,8 @@ export const MENU_ACTION_EVENT = "menu://action"
 
 export type NativeContextMenuItem =
   | {
+      /** A choice among several, shown with AppKit's checkmark when true. */
+      checked?: boolean
       enabled?: boolean
       id: string
       kind: "item"
@@ -19,6 +21,19 @@ export type NativeContextMenuItem =
   | {
       kind: "separator"
     }
+
+/** A popup's top-left corner in CSS pixels from the window's top-left. */
+export type NativeMenuPoint = {
+  x: number
+  y: number
+}
+
+/** Where a dropdown's menu opens: under its trigger, as a pull-down button's. */
+export function nativeMenuPointBelow(trigger: Element): NativeMenuPoint {
+  const rect = trigger.getBoundingClientRect()
+
+  return { x: rect.left, y: rect.bottom + 4 }
+}
 
 export type MacMenuStaticLabels = {
   aboutApp: string
@@ -237,12 +252,14 @@ export async function syncMacMenu(snapshot: MacMenuSnapshot, seq: number): Promi
   await invoke("sync_macos_menu", { seq, snapshot })
 }
 
+/** Pops up AppKit's menu at `at`, or at the pointer without one. */
 export async function popupNativeContextMenu(
   items: NativeContextMenuItem[],
+  at?: NativeMenuPoint,
 ): Promise<string | null> {
   if (!isMacOS() || items.length === 0) {
     return null
   }
 
-  return invoke<string | null>("popup_context_menu", { items })
+  return invoke<string | null>("popup_context_menu", { at: at ?? null, items })
 }

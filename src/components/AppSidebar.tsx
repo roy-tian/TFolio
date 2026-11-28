@@ -9,7 +9,7 @@ import {
 import { ChevronDown, GalleryVertical, ListTree, PanelLeft } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import { HintTooltip } from "@/components/HintTooltip"
+import { HintTooltip, SharedHintTooltips } from "@/components/HintTooltip"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Button } from "@/components/ui/button"
 import {
@@ -20,7 +20,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Toggle } from "@/components/ui/toggle"
-import { useSidebar } from "@/hooks/useSidebar"
+import { useNativeDropdown } from "@/hooks/useNativeDropdown"
+import { useSidebar, useSidebarSized, useSidebarWidth } from "@/hooks/useSidebar"
 import { hasLayerOverWorkspace } from "@/lib/contextMenu"
 import {
   clampSidebarWidth,
@@ -69,9 +70,22 @@ export function SidebarPanelSwitch({ panel }: { panel: SidebarPanel }) {
     panelOptions.find((option) => option.value === panel) ?? panelOptions[0]
   const CurrentIcon = current.icon
   const currentLabel = t(current.labelKey)
+  const menu = useNativeDropdown(() => ({
+    choose: (chosen) => {
+      if (isSidebarPanel(chosen)) {
+        sidebar.setPanel(chosen)
+      }
+    },
+    items: panelOptions.map((option) => ({
+      checked: option.value === panel,
+      id: option.value,
+      kind: "item",
+      label: t(option.labelKey),
+    })),
+  }))
 
   return (
-    <DropdownMenu>
+    <DropdownMenu {...menu}>
       {/* Only a cut-short name has more to say: a tooltip repeating the whole
           label would sit over the panel's own bar for nothing. */}
       <ToolbarTooltip cutShort={labelRef} label={currentLabel}>
@@ -131,9 +145,8 @@ export function SidebarPanelSwitch({ panel }: { panel: SidebarPanel }) {
  * The sidebar's right edge, dragged or arrowed to widen it: wide, its pages
  * stand in rows of several. Double-click goes back to the opening width, and
  * from there, docked, out to as wide as the pages beside it, or as wide as the
- * window lets it. The drag
- * sets the workspace root's width itself, frame by frame, and settles it in
- * the window's state only on release, so App renders once per drag.
+ * window lets it. The drag shows its width frame by frame and settles it only
+ * on release.
  */
 function SidebarResizeHandle() {
   const { t } = useTranslation()
@@ -144,7 +157,8 @@ function SidebarResizeHandle() {
   // The drag under way, ended unsettled if the sidebar goes before its release:
   // hidden by its shortcut, or turned into an overlay by a narrowing window.
   const abortRef = useRef<(() => void) | null>(null)
-  const { persistWidth, reserved, setWidth } = sidebar
+  const { persistWidth, reserved, setWidth, widthStore } = sidebar
+  const width = useSidebarWidth()
 
   useEffect(() => () => abortRef.current?.(), [])
 
@@ -154,9 +168,8 @@ function SidebarResizeHandle() {
 
   const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     const handle = event.currentTarget
-    const root = handle.closest<HTMLElement>("[data-sidebar]")
 
-    if (event.button !== 0 || !root) {
+    if (event.button !== 0) {
       return
     }
 
@@ -165,22 +178,15 @@ function SidebarResizeHandle() {
 
     const startX = event.clientX
     const startWidth = shownWidth(handle)
-    const before = {
-      chosen: root.style.getPropertyValue("--sidebar-chosen"),
-      marked: root.hasAttribute("data-sidebar-width"),
-      reserved: root.style.getPropertyValue("--sidebar-reserved"),
-    }
-    let width = startWidth
+    let dragged = startWidth
     let frame = 0
 
     const apply = () => {
       frame = 0
-      root.setAttribute("data-sidebar-width", "")
-      root.style.setProperty("--sidebar-chosen", `${width}px`)
-      root.style.setProperty("--sidebar-reserved", `${reserved}px`)
+      widthStore.show(dragged)
     }
     const move = (moved: PointerEvent) => {
-      width = clampSidebarWidth(startWidth + moved.clientX - startX, window.innerWidth, reserved)
+      dragged = clampSidebarWidth(startWidth + moved.clientX - startX, window.innerWidth, reserved)
 
       if (!frame) {
         frame = requestAnimationFrame(apply)
@@ -195,16 +201,12 @@ function SidebarResizeHandle() {
       document.removeEventListener("keydown", escape, true)
       setResizing(false)
 
-      if (commit && width !== startWidth) {
-        apply()
-        setWidth(width)
+      if (commit && dragged !== startWidth) {
+        setWidth(dragged)
         return
       }
 
-      // Back as React last left the root, which then has nothing to undo.
-      root.toggleAttribute("data-sidebar-width", before.marked)
-      root.style.setProperty("--sidebar-chosen", before.chosen)
-      root.style.setProperty("--sidebar-reserved", before.reserved)
+      widthStore.show(widthStore.get())
     }
     const release = () => finish(true)
     const cancel = () => finish(false)
@@ -255,9 +257,7 @@ function SidebarResizeHandle() {
   // As the window shows it: a stored width past the window's room is clamped.
   const widest = Math.max(SIDEBAR_MIN_WIDTH, Math.floor(viewportWidth - reserved))
   const shown =
-    sidebar.width === null
-      ? SIDEBAR_MIN_WIDTH
-      : clampSidebarWidth(sidebar.width, viewportWidth, reserved)
+    width === null ? SIDEBAR_MIN_WIDTH : clampSidebarWidth(width, viewportWidth, reserved)
   const doubleClick = sidebarDoubleClick(sidebar.mode, shown, viewportWidth, reserved)
   const hintLabel =
     doubleClick?.action === "restore" ? t("sidebar.resizeRestore") : t("sidebar.resizeExpand")
@@ -320,6 +320,7 @@ type AppSidebarProps = {
 export function AppSidebar({ children, footer, macOS, switcher }: AppSidebarProps) {
   const sidebar = useSidebar()
   const asideRef = useRef<HTMLElement>(null)
+  const sizeAside = useSidebarSized(asideRef)
   const overlay = sidebar.mode === "overlay"
   const { dismiss } = sidebar
 
@@ -371,7 +372,7 @@ export function AppSidebar({ children, footer, macOS, switcher }: AppSidebarProp
       )}
       data-sidebar-mode={sidebar.mode}
       data-slot="app-sidebar"
-      ref={asideRef}
+      ref={sizeAside}
     >
       <div
         className={cn(
@@ -387,7 +388,10 @@ export function AppSidebar({ children, footer, macOS, switcher }: AppSidebarProp
         <SidebarToggle />
         {switcher ? <div className="ml-auto flex min-w-0 justify-end">{switcher}</div> : null}
       </div>
-      <div className="min-h-0 flex-1">{children}</div>
+      <div className="min-h-0 flex-1">
+        {/* Rows and pages by the hundred, their hints one tooltip. */}
+        <SharedHintTooltips>{children}</SharedHintTooltips>
+      </div>
       {footer ? (
         // As the status bar: its line over the row, and pb-px to keep the
         // control at the bar's height.

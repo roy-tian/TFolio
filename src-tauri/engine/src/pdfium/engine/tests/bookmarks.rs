@@ -346,3 +346,224 @@ fn multi_file_section_bookmarks_can_be_renamed_deleted_and_restored() {
 
     fs::remove_dir_all(directory).ok();
 }
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn bookmarks_can_be_added_to_empty_and_existing_outlines_and_follow_page_moves() {
+    let engine = test_engine();
+    let directory = scratch_directory("bookmarks-add");
+
+    // Adding a bookmark to a PDF with no /Outlines creates one on save and export.
+    let blank_path = directory.join("no-outline.pdf");
+    let created = engine.create_blank().expect("create blank doc");
+    engine
+        .insert_blank_page(created.id, 2, None)
+        .expect("insert page 2");
+    engine
+        .insert_blank_page(created.id, 3, None)
+        .expect("insert page 3");
+    engine
+        .export_to(created.id, &blank_path)
+        .expect("save blank 3-page doc");
+    engine.close(created.id).ok();
+
+    let empty_doc = engine
+        .open_from_path(blank_path.clone())
+        .expect("open 3-page doc");
+    assert!(empty_doc.outline.is_empty());
+    assert!(!empty_doc.splits_by_bookmarks);
+
+    // Rejects invalid path, page number, and blank or overlong title without creating edits.
+    assert!(engine
+        .add_bookmark(empty_doc.id, None, &[], 1, "Cover")
+        .is_err());
+    assert!(engine
+        .add_bookmark(empty_doc.id, None, &[1], 1, "Out of range")
+        .is_err());
+    assert!(engine
+        .add_bookmark(empty_doc.id, None, &[0], 0, "Zero")
+        .is_err());
+    assert!(engine
+        .add_bookmark(empty_doc.id, None, &[0], 4, "Past end")
+        .is_err());
+    assert!(engine
+        .add_bookmark(empty_doc.id, None, &[0], 1, "   ")
+        .is_err());
+    assert!(engine
+        .add_bookmark(empty_doc.id, None, &[0], 1, &"a".repeat(513))
+        .is_err());
+
+    let added = engine
+        .add_bookmark(empty_doc.id, None, &[0], 2, "  第二页书签  ")
+        .expect("add bookmark on page 2");
+    assert_eq!(
+        outline_summary(&added.outline),
+        vec![("第二页书签".to_string(), Some(2), 0)]
+    );
+    assert!(added.splits_by_bookmarks);
+
+    // Reordering page 2 to page 3 moves the added bookmark with its page.
+    let reordered = engine
+        .reorder_pages(empty_doc.id, &[1, 3, 2], None)
+        .expect("reorder pages");
+    assert_eq!(reordered.outline[0].page_number, Some(3));
+
+    // Deleting the targeted page and undoing it restores the bookmark's destination.
+    let after_del = engine
+        .delete_pages(empty_doc.id, &[3], 50)
+        .expect("delete page 3");
+    assert_eq!(after_del.outline[0].page_number, None);
+    let after_restore = engine
+        .restore_pages(empty_doc.id, 50)
+        .expect("restore page 3");
+    assert_eq!(after_restore.outline[0].page_number, Some(3));
+
+    // Save persists newly created /Outlines onto disk, and compress / A4 carry it too.
+    engine.save(empty_doc.id).expect("save with new outline");
+    let reopened = engine.open_from_path(blank_path).expect("reopen saved doc");
+    assert_eq!(
+        outline_summary(&reopened.outline),
+        vec![("第二页书签".to_string(), Some(3), 0)]
+    );
+    engine.close(reopened.id).ok();
+
+    let compressed_path = directory.join("compressed-added.pdf");
+    engine
+        .export_compressed(
+            empty_doc.id,
+            &compressed_path,
+            CompressionOptions { image_quality: 100 },
+            |_, _| {},
+        )
+        .expect("compress with added bookmark");
+    let compressed = engine
+        .open_from_path(compressed_path)
+        .expect("open compressed");
+    assert_eq!(
+        outline_summary(&compressed.outline),
+        vec![("第二页书签".to_string(), Some(3), 0)]
+    );
+    engine.close(compressed.id).ok();
+
+    let a4 = engine
+        .fit_to_a4(empty_doc.id, |_, _| {})
+        .expect("fit_to_a4")
+        .expect("not cancelled");
+    assert_eq!(
+        outline_summary(&a4.document.outline),
+        vec![("第二页书签".to_string(), Some(3), 0)]
+    );
+    engine.close(a4.document.id).ok();
+
+    // remove_bookmark undoes add_bookmark cleanly without creating a stash.
+    let removed = engine
+        .remove_bookmark(empty_doc.id, None, &[0])
+        .expect("remove added bookmark");
+    assert!(removed.outline.is_empty());
+    {
+        let documents = engine.lock_documents().expect("documents lock");
+        assert!(documents
+            .get(&empty_doc.id)
+            .expect("open doc")
+            .bookmark_stashes
+            .is_empty());
+    }
+    engine.close(empty_doc.id).ok();
+
+    // Adding a child bookmark inside an existing nested outline preserves existing bookmarks.
+    let nested = engine
+        .open(nested_bookmarks_pdf())
+        .expect("open nested outline fixture");
+    let with_child = engine
+        .add_bookmark(nested.id, None, &[1, 1], 3, "Inserted Child")
+        .expect("add nested child");
+    assert_eq!(with_child.outline[1].items.len(), 2);
+    assert_eq!(with_child.outline[1].items[1].title, "Inserted Child");
+    assert_eq!(with_child.outline[1].items[1].page_number, Some(3));
+
+    let nested_out = directory.join("nested-added.pdf");
+    engine
+        .export_to(nested.id, &nested_out)
+        .expect("export nested with added child");
+    let reopened_nested = engine.open_from_path(nested_out).expect("reopen nested");
+    assert_eq!(reopened_nested.outline[1].items.len(), 2);
+    assert_eq!(reopened_nested.outline[1].items[0].page_number, Some(2));
+    assert_eq!(reopened_nested.outline[1].items[1].title, "Inserted Child");
+    assert_eq!(reopened_nested.outline[1].items[1].page_number, Some(3));
+    engine.close(reopened_nested.id).ok();
+    engine.close(nested.id).ok();
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn multi_file_section_bookmarks_can_be_added_and_enforced_per_section() {
+    let engine = test_engine();
+    let directory = scratch_directory("bookmarks-add-sections");
+    let own = engine
+        .open(outlined_three_page_pdf())
+        .expect("open own pdf");
+
+    let added_path = directory.join("added.pdf");
+    fs::write(&added_path, nested_bookmarks_pdf()).expect("write added pdf");
+    let ids = engine
+        .read_sources("bookmarks-add-sections", vec![added_path], false)
+        .expect("read sources")
+        .into_iter()
+        .map(|info| info.id.expect("valid id"))
+        .collect::<Vec<_>>();
+
+    engine
+        .insert_sources(
+            "bookmarks-add-sections",
+            own.id,
+            &ids,
+            4,
+            "own.pdf",
+            FileOptions {
+                smart_padding: false,
+            },
+            &HashMap::new(),
+        )
+        .expect("insert sources");
+
+    // Rejects adding a page that belongs to another section.
+    assert!(engine
+        .add_bookmark(own.id, Some(1), &[0], 1, "Wrong file")
+        .is_err());
+
+    // Add to section 0 and section 1.
+    let u1 = engine
+        .add_bookmark(own.id, Some(0), &[1], 2, "Own Added")
+        .expect("add in section 0");
+    assert_eq!(u1.sections[0].outline[1].title, "Own Added");
+    assert_eq!(u1.sections[0].outline[1].page_number, Some(2));
+
+    let u2 = engine
+        .add_bookmark(own.id, Some(1), &[3], 5, "Second File Added")
+        .expect("add in section 1");
+    assert_eq!(u2.sections[1].outline[3].title, "Second File Added");
+    assert_eq!(u2.sections[1].outline[3].page_number, Some(5));
+
+    // Export persists both sections' added bookmarks.
+    let out_path = directory.join("combined-added.pdf");
+    engine
+        .export_to(own.id, &out_path)
+        .expect("export combined");
+    let reopened = engine.open_from_path(out_path).expect("reopen combined");
+    assert_eq!(reopened.outline[0].items[1].title, "Own Added");
+    assert_eq!(reopened.outline[0].items[1].page_number, Some(2));
+    assert_eq!(reopened.outline[1].items[3].title, "Second File Added");
+    assert_eq!(reopened.outline[1].items[3].page_number, Some(5));
+    engine.close(reopened.id).ok();
+
+    // Deleting added file returns to single file while keeping section 0's added bookmark.
+    let back = engine
+        .delete_pages(own.id, &[4, 5, 6], 60)
+        .expect("delete added file");
+    assert_eq!(back.outline[1].title, "Own Added");
+    assert_eq!(back.outline[1].page_number, Some(2));
+
+    fs::remove_dir_all(directory).ok();
+}

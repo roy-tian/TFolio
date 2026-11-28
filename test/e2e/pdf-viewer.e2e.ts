@@ -1,6 +1,7 @@
 import { $, $$, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
+import type { E2eOverrides } from "../../src/lib/e2e"
 import {
   activeSidebar,
   clickAppMenuItem,
@@ -10,11 +11,13 @@ import {
   openPdfFromDisk,
   outlinedPdf,
   pageInk,
+  pressRedo,
   refreshApp,
   renderedPage,
   seedSettings,
   switchSidebarPanel,
   textPdf,
+  tooltipOn,
 } from "./helpers"
 import { calibratePointer, pointer } from "./nativePointer"
 
@@ -463,6 +466,141 @@ describe("TFolio PDF viewer", () => {
     // Undo the rename too, then verify clean state.
     await browser.keys(["Control", "z"])
     await bookmarks.$("button=Part one").waitForDisplayed()
+  })
+
+  it("adds a bookmark at the current page from the outline bar, cancels on Escape, and supports undo/redo", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+    await openPdfFromDisk("add-bookmark.pdf", minimalPdf(3))
+    await $("[data-page-number='1']").waitForDisplayed()
+
+    await switchSidebarPanel("bookmarks")
+    const addButton = $(`${activeSidebar} [data-slot='sidebar-add-bookmark']`)
+    await addButton.waitForDisplayed()
+
+    // Placed immediately to the left of the fold/unfold button.
+    const [addRight, foldLeft] = await browser.execute(
+      (addCss: string, foldCss: string): [number, number] => [
+        document.querySelector<HTMLElement>(addCss)!.getBoundingClientRect().right,
+        document.querySelector<HTMLElement>(foldCss)!.getBoundingClientRect().left,
+      ],
+      `${activeSidebar} [data-slot='sidebar-add-bookmark']`,
+      `${activeSidebar} [data-slot='sidebar-fold-all']`,
+    )
+    expect(addRight).toBeLessThanOrEqual(foldLeft)
+
+    // Jump to page 2 and cancel a draft with Escape.
+    const pageInput = $("input[aria-label='Page number']")
+    await pageInput.setValue("2")
+    await browser.keys("Enter")
+    await browser.waitUntil(
+      async () => (await pageInput.getValue()) === "2",
+      { timeoutMsg: "never jumped to page 2" },
+    )
+
+    const draftInput = () => $(`${activeSidebar} [data-slot='bookmark-title-input']`)
+    await addButton.click()
+    await draftInput().waitForDisplayed()
+    await expect(draftInput()).toBeFocused()
+    expect(await draftInput().getValue()).toBe("Page 2")
+    await browser.keys("Escape")
+    await expect(draftInput()).not.toBeExisting()
+
+    // Add a named bookmark on page 2, verify navigation from page 1, then undo and redo.
+    const bookmarks = $(`${activeSidebar} nav[aria-label='Bookmarks']`)
+    await addButton.click()
+    const input = draftInput()
+    await input.waitForDisplayed()
+    await input.setValue("Key findings")
+    await browser.keys("Enter")
+    await bookmarks.$("button=Key findings").waitForDisplayed()
+
+    await pageInput.setValue("1")
+    await browser.keys("Enter")
+    await browser.waitUntil(
+      async () => (await pageInput.getValue()) === "1",
+      { timeoutMsg: "never jumped back to page 1" },
+    )
+
+    await bookmarks.$("button=Key findings").click()
+    await browser.waitUntil(
+      async () => (await pageInput.getValue()) === "2",
+      { timeoutMsg: "clicking added bookmark never jumped to page 2" },
+    )
+
+    await browser.keys(["Control", "z"])
+    await expect(bookmarks.$("button=Key findings")).not.toBeExisting()
+    await pressRedo()
+    await bookmarks.$("button=Key findings").waitForDisplayed()
+
+    // While an operation holds the tab's queue, bookmark editing controls are
+    // greyed out with a reason tooltip and double-click rename is blocked.
+    await browser.execute(() => {
+      const page = window as Window & {
+        __finishSaveAs?: () => void
+        __tfolioE2E?: E2eOverrides
+      }
+
+      page.__tfolioE2E = {
+        ...page.__tfolioE2E,
+        exportPdf: () =>
+          new Promise((resolve) => {
+            page.__finishSaveAs = () => resolve(null)
+          }),
+      }
+    })
+    await clickAppMenuItem("save-as")
+    await browser.waitUntil(
+      () =>
+        browser.execute(
+          () =>
+            typeof (window as Window & { __finishSaveAs?: unknown }).__finishSaveAs === "function",
+        ),
+      { timeoutMsg: "the Save As holding the queue never started" },
+    )
+
+    const busyControls = [
+      `${activeSidebar} [data-slot='sidebar-add-bookmark']`,
+      `${activeSidebar} nav[aria-label='Bookmarks'] [data-slot='bookmark-rename']`,
+      `${activeSidebar} nav[aria-label='Bookmarks'] [data-slot='bookmark-delete']`,
+    ]
+
+    try {
+      for (const selector of busyControls) {
+        await expect($(selector)).toBeDisabled()
+        expect(
+          await browser.execute(
+            (css: string) => getComputedStyle(document.querySelector(css)!).cursor,
+            selector,
+          ),
+        ).toBe("not-allowed")
+        expect(await tooltipOn(selector)).toBe("Wait for the current edit to finish")
+      }
+
+      await browser.execute((css: string) => {
+        document
+          .querySelector<HTMLElement>(css)!
+          .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))
+      }, `${activeSidebar} nav[aria-label='Bookmarks'] [data-slot='bookmark-row'] button`)
+      await expect(draftInput()).not.toBeExisting()
+    } finally {
+      await browser.execute(() => {
+        const page = window as Window & {
+          __finishSaveAs?: () => void
+          __tfolioE2E?: E2eOverrides
+        }
+
+        page.__finishSaveAs?.()
+        delete page.__finishSaveAs
+        if (page.__tfolioE2E) {
+          delete page.__tfolioE2E.exportPdf
+        }
+      })
+    }
+
+    for (const selector of busyControls) {
+      await expect($(selector)).toBeEnabled()
+    }
   })
 
   it("turns whole pages and spreads with Page Up and Page Down at any zoom", async () => {

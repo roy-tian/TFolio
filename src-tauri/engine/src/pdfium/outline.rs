@@ -17,14 +17,41 @@ pub(super) struct OutlineNode {
 /// titles are a merged file's own text, so they are cut rather than trusted.
 pub(super) const MAX_TITLE_CHARS: usize = 512;
 
-/// An editable bookmark in a single-file document, tracking its original
-/// child-index path in PDFium's `/Outlines` tree so `lopdf` can mutate only
-/// its `/Title` and tree links while preserving destinations, actions, and styles.
+/// Where an editable bookmark in a single-file document gets its destination
+/// and styling from.
+#[derive(Clone, Debug)]
+pub(super) enum OutlineTarget {
+    /// Existing bookmark in PDFium's `/Outlines` tree, identified by its
+    /// original child-index path so `lopdf` can mutate only `/Title` and tree
+    /// links while preserving destinations, actions, colours, and style flags.
+    Existing(Vec<usize>),
+    /// Bookmark added in this session, aimed at a page by its stable `page_id`
+    /// so it follows reorders, insertions, and delete/undo cycles.
+    Added { page_id: u64 },
+}
+
+/// An editable bookmark in a single-file document.
 #[derive(Clone, Debug)]
 pub(super) struct EditableOutlineItem {
-    pub(super) origin: Vec<usize>,
+    pub(super) target: OutlineTarget,
     pub(super) title: String,
     pub(super) children: Vec<EditableOutlineItem>,
+}
+
+/// Snapshot of `OutlineTarget` with added bookmarks' `page_id`s resolved to
+/// 0-based page indices under the documents lock so `lopdf` can run off it.
+#[derive(Clone, Debug)]
+pub(super) enum ResolvedOutlineTarget {
+    Existing(Vec<usize>),
+    Added { page: Option<usize> },
+}
+
+/// Snapshot of `EditableOutlineItem` ready for `apply_outline_edits`.
+#[derive(Clone, Debug)]
+pub(super) struct ResolvedOutlineItem {
+    pub(super) target: ResolvedOutlineTarget,
+    pub(super) title: String,
+    pub(super) children: Vec<ResolvedOutlineItem>,
 }
 
 fn check_title_length(title: &str) -> Result<(), String> {
@@ -97,11 +124,19 @@ pub(super) fn replace_outline(bytes: Vec<u8>, nodes: &[OutlineNode]) -> Result<V
     Ok(written)
 }
 
-/// Applies title edits and deletions onto PDFium's fresh output, preserving
-/// each surviving bookmark's destination, action, colour, and style flags.
+fn has_added_items(items: &[ResolvedOutlineItem]) -> bool {
+    items.iter().any(|item| {
+        matches!(item.target, ResolvedOutlineTarget::Added { .. })
+            || has_added_items(&item.children)
+    })
+}
+
+/// Applies title edits, additions, and deletions onto PDFium's fresh output,
+/// preserving each surviving existing bookmark's destination, action, colour,
+/// and style flags while writing newly added bookmarks directly.
 pub(super) fn apply_outline_edits(
     bytes: Vec<u8>,
-    items: &[EditableOutlineItem],
+    items: &[ResolvedOutlineItem],
 ) -> Result<Vec<u8>, String> {
     let mut document = Document::load_mem(&bytes)
         .map_err(|error| format!("the document could not be reread for its outline: {error}"))?;
@@ -117,23 +152,26 @@ pub(super) fn apply_outline_edits(
         .ok()
         .cloned();
 
-    let Some(outlines_obj) = outlines_ref else {
-        return if items.is_empty() {
-            Ok(bytes)
-        } else {
-            Err("the document has no outline to update".into())
-        };
-    };
-
-    let outlines_id = match outlines_obj {
-        Object::Reference(id) => id,
-        Object::Dictionary(dict) => {
+    let (outlines_id, had_outlines) = match outlines_ref {
+        Some(Object::Reference(id)) => (id, true),
+        Some(Object::Dictionary(dict)) => {
             let id = document.add_object(dict);
             document
                 .catalog_mut()
                 .map_err(|error| format!("the document has no catalogue: {error}"))?
                 .set("Outlines", Object::Reference(id));
-            id
+            (id, true)
+        }
+        None if items.is_empty() => return Ok(bytes),
+        None => {
+            let mut dict = Dictionary::new();
+            dict.set("Type", Object::Name(b"Outlines".to_vec()));
+            let id = document.add_object(dict);
+            document
+                .catalog_mut()
+                .map_err(|error| format!("the document has no catalogue: {error}"))?
+                .set("Outlines", Object::Reference(id));
+            (id, false)
         }
         _ => return Err("the document's outline is not a dictionary".into()),
     };
@@ -141,17 +179,19 @@ pub(super) fn apply_outline_edits(
     let mut by_origin = HashMap::new();
     let mut all_ids = Vec::new();
     let mut closed = HashSet::new();
-    let mut visited = HashSet::new();
-    let mut path = Vec::new();
-    collect_existing_outline(
-        &document,
-        outlines_id,
-        &mut path,
-        &mut visited,
-        &mut by_origin,
-        &mut all_ids,
-        &mut closed,
-    );
+    if had_outlines {
+        let mut visited = HashSet::new();
+        let mut path = Vec::new();
+        collect_existing_outline(
+            &document,
+            outlines_id,
+            &mut path,
+            &mut visited,
+            &mut by_origin,
+            &mut all_ids,
+            &mut closed,
+        );
+    }
 
     if items.is_empty() {
         document
@@ -163,12 +203,18 @@ pub(super) fn apply_outline_edits(
             document.objects.remove(&id);
         }
     } else {
+        let pages: Vec<ObjectId> = if has_added_items(items) {
+            document.get_pages().into_values().collect()
+        } else {
+            Vec::new()
+        };
         let mut kept = HashSet::new();
         let (first, last, count) = relink_outline_level(
             &mut document,
             outlines_id,
             items,
             &by_origin,
+            &pages,
             &closed,
             &mut kept,
         )?;
@@ -244,8 +290,9 @@ fn collect_existing_outline(
 fn relink_outline_level(
     document: &mut Document,
     parent_id: ObjectId,
-    items: &[EditableOutlineItem],
+    items: &[ResolvedOutlineItem],
     by_origin: &HashMap<Vec<usize>, ObjectId>,
+    pages: &[ObjectId],
     closed: &HashSet<ObjectId>,
     kept: &mut HashSet<ObjectId>,
 ) -> Result<(Option<ObjectId>, Option<ObjectId>, i64), String> {
@@ -255,8 +302,23 @@ fn relink_outline_level(
 
     let mut ids = Vec::with_capacity(items.len());
     for item in items {
-        let Some(&id) = by_origin.get(&item.origin) else {
-            return Err("the bookmark to update could not be found in the PDF outline".into());
+        let id = match &item.target {
+            ResolvedOutlineTarget::Existing(origin) => *by_origin.get(origin).ok_or_else(|| {
+                "the bookmark to update could not be found in the PDF outline".to_string()
+            })?,
+            ResolvedOutlineTarget::Added { page } => {
+                let mut dict = Dictionary::new();
+                if let Some(page_id) = page.and_then(|index| pages.get(index).copied()) {
+                    dict.set(
+                        "Dest",
+                        Object::Array(vec![
+                            Object::Reference(page_id),
+                            Object::Name(b"Fit".to_vec()),
+                        ]),
+                    );
+                }
+                document.add_object(dict)
+            }
         };
         ids.push(id);
     }
@@ -267,7 +329,7 @@ fn relink_outline_level(
         kept.insert(id);
 
         let (child_first, child_last, child_visible) =
-            relink_outline_level(document, id, &item.children, by_origin, closed, kept)?;
+            relink_outline_level(document, id, &item.children, by_origin, pages, closed, kept)?;
 
         let dict = document
             .get_dictionary_mut(id)

@@ -42,7 +42,7 @@ import { useBatchLimitPrompt } from "@/hooks/useBatchLimitPrompt"
 import { useSignaturePrompt } from "@/hooks/useSignaturePrompt"
 import { PageCarryContext, usePageCarry } from "@/hooks/usePageCarry"
 import { SidebarDropContext, setSidebarDropPoint, type SidebarDrop } from "@/hooks/useSidebarDrop"
-import { SidebarContext, useSidebarState } from "@/hooks/useSidebar"
+import { SidebarContext, SidebarWidthContext, useSidebarState } from "@/hooks/useSidebar"
 import { OPEN_FILES_AT_ONCE } from "@/lib/batchLimits"
 import { hasLayerOverWorkspace, isTypingTarget } from "@/lib/contextMenu"
 import { e2eOverride, isE2eBuild } from "@/lib/e2e"
@@ -75,7 +75,6 @@ import {
   type PdfDocumentInfo,
 } from "@/lib/pdf"
 import { isMacOS, isWindows } from "@/lib/platform"
-import { sidebarWidthStyle } from "@/lib/sidebar"
 import { cn } from "@/lib/utils"
 import { findOpenFile } from "@/lib/openFiles"
 import type { DocumentMenuState } from "@/lib/nativeMenu"
@@ -2507,12 +2506,16 @@ export default function App() {
     }
   }, [homeActive, refreshRecentFiles])
 
+  // Beside the sidebar while it takes the drop, so as wide as it shows.
+  const sizeDropOverlay = useCallback(
+    (element: HTMLDivElement | null) => (element ? sidebar.widthStore.size(element) : undefined),
+    [sidebar.widthStore],
+  )
+
   const workspace = (
     <div
       className="app-surface h-svh overflow-hidden"
       data-sidebar={sidebar.mode}
-      data-sidebar-width={sidebar.width === null ? undefined : ""}
-      style={sidebarWidthStyle(sidebar.width, sidebar.reserved)}
     >
       {homeActive ? (
         // The document tools — bookmarks, view mode — have no document to act
@@ -2630,6 +2633,7 @@ export default function App() {
               : "border-primary/60 bg-background/90",
           )}
           data-testid="workspace-file-drop"
+          ref={sizeDropOverlay}
         >
           <div className="flex flex-col items-center text-center">
             <FileUp className="mb-4 size-12" />
@@ -2745,11 +2749,13 @@ export default function App() {
   return (
     <AppUpdateContext.Provider value={appUpdate}>
       <SidebarContext.Provider value={sidebar}>
-        <SidebarDropContext.Provider value={sidebarDrop}>
-          <PageCarryContext.Provider value={pageCarry.carry}>
-            {workspace}
-          </PageCarryContext.Provider>
-        </SidebarDropContext.Provider>
+        <SidebarWidthContext.Provider value={sidebar.widthStore}>
+          <SidebarDropContext.Provider value={sidebarDrop}>
+            <PageCarryContext.Provider value={pageCarry.carry}>
+              {workspace}
+            </PageCarryContext.Provider>
+          </SidebarDropContext.Provider>
+        </SidebarWidthContext.Provider>
       </SidebarContext.Provider>
     </AppUpdateContext.Provider>
   )

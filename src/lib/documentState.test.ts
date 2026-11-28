@@ -3,6 +3,7 @@ import { describe, expect, it } from "bun:test"
 import {
   commit,
   emptyHistory,
+  planAddBookmark,
   planDeleteBookmark,
   planDeletePages,
   planDuplicatePages,
@@ -219,6 +220,10 @@ describe("isDirty, judged by what a save would write", () => {
     const deleted = after(emptyHistory, (history) => planDeleteBookmark(history, [0]))
     expect(isDirty(deleted)).toBe(true)
     expect(isDirty(after(deleted, back))).toBe(false)
+
+    const added = after(emptyHistory, (history) => planAddBookmark(history, [0], 2, 3, "Section"))
+    expect(isDirty(added)).toBe(true)
+    expect(isDirty(after(added, back))).toBe(false)
   })
 
   // Runs, padding and file bookmarks are the engine's, so a document that took

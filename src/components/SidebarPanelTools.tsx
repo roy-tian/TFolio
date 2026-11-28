@@ -53,10 +53,42 @@ export function SidebarPanelTools({ children, fold }: SidebarPanelToolsProps) {
 }
 
 /** The bar over the outline, as `PagesBar` stands over the pages. */
-export function OutlineBar(props: SidebarPanelToolsProps) {
+export function OutlineBar({
+  add,
+  children,
+  fold,
+}: SidebarPanelToolsProps & {
+  add?: {
+    active?: boolean
+    disabled?: boolean
+    disabledLabel?: string
+    label: string
+    onAdd: () => void
+  }
+}) {
   return (
     <div className="flex h-9 shrink-0 items-center border-b px-2" data-slot="outline-bar">
-      <SidebarPanelTools {...props} />
+      <SidebarPanelTools fold={fold}>
+        {add ? (
+          <ToolbarTooltip label={add.disabled && add.disabledLabel ? add.disabledLabel : add.label}>
+            <Button
+              aria-label={add.label}
+              data-slot="sidebar-add-bookmark"
+              disabled={add.disabled}
+              onClick={add.onAdd}
+              // Keep focus in an active draft input if `+` is pressed again.
+              onPointerDown={
+                add.active && !add.disabled ? (event) => event.preventDefault() : undefined
+              }
+              size="icon-sm"
+              variant="ghost"
+            >
+              <Plus />
+            </Button>
+          </ToolbarTooltip>
+        ) : null}
+        {children}
+      </SidebarPanelTools>
     </div>
   )
 }

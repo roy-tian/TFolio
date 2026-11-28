@@ -3,12 +3,16 @@ import { describe, expect, test } from "bun:test"
 import {
   activeBookmarkKey,
   activeFileOutlineTarget,
+  bookmarkInsertPath,
+  bookmarkParentKey,
   fileFoldKey,
   foldableBookmarks,
   foldAllOf,
   foldsAfterBookmarkDelete,
+  foldsAfterBookmarkInsert,
   NO_FOLDS,
   toggledFold,
+  unfoldBookmarkAncestors,
 } from "./outlineFolds"
 import type { FileRun } from "./pageSections"
 import type { PdfOutlineItem, PdfSection } from "./pdf"
@@ -210,5 +214,67 @@ describe("foldsAfterBookmarkDelete", () => {
       "root-0-1-0",
       "root-1",
     ])
+  })
+})
+
+describe("foldsAfterBookmarkInsert", () => {
+  test("shifts siblings at or after the insertion point up by one", () => {
+    const folds = new Set(["root-0", "root-1", "root-1-0", "root-2", "file-1"])
+
+    expect([...foldsAfterBookmarkInsert(folds, "root", 1)].sort()).toEqual([
+      "file-1",
+      "root-0",
+      "root-2",
+      "root-2-0",
+      "root-3",
+    ])
+  })
+
+  test("returns the same set reference when no sibling needs shifting", () => {
+    const folds = new Set(["root-0", "file-1"])
+
+    expect(foldsAfterBookmarkInsert(folds, "root", 2)).toBe(folds)
+  })
+})
+
+describe("bookmarkParentKey and unfoldBookmarkAncestors", () => {
+  test("derives the parent fold key along a path", () => {
+    expect(bookmarkParentKey("root", [2])).toBe("root")
+    expect(bookmarkParentKey("root", [0, 1])).toBe("root-0")
+    expect(bookmarkParentKey("section-3", [1, 2, 0])).toBe("section-3-1-2")
+  })
+
+  test("unfolds every ancestor bookmark and enclosing file along the insertion path", () => {
+    const folds = new Set(["file-2", "section-2-0", "section-2-0-1", "section-2-1", "file-3"])
+
+    expect(
+      [...unfoldBookmarkAncestors(folds, "section-2", [0, 1, 0], 2)].sort(),
+    ).toEqual(["file-3", "section-2-1"])
+    expect(unfoldBookmarkAncestors(NO_FOLDS, "root", [0])).toBe(NO_FOLDS)
+  })
+})
+
+describe("bookmarkInsertPath", () => {
+  test("places into an empty or page-less outline at the end, and before the first bookmark when earlier", () => {
+    expect(bookmarkInsertPath([], 3)).toEqual([0])
+    expect(bookmarkInsertPath([item("External", [], null)], 2)).toEqual([1])
+    expect(bookmarkInsertPath([item("Start", [], 3), item("End", [], 6)], 1)).toEqual([0])
+  })
+
+  test("inserts after the active bookmark in reading order across flat and nested outlines", () => {
+    const nested = [
+      item("Ch 1", [item("1.1", [], 2), item("1.2", [], 5)], 1),
+      item("Ch 2", [], 8),
+    ]
+
+    // Active parent with children whose pages come after -> first child.
+    expect(bookmarkInsertPath(nested, 1)).toEqual([0, 0])
+    // Between 1.1 (p.2) and 1.2 (p.5) -> sibling right after 1.1.
+    expect(bookmarkInsertPath(nested, 4)).toEqual([0, 1])
+    // After 1.2 (p.5), before Ch 2 (p.8) -> sibling right after 1.2.
+    expect(bookmarkInsertPath(nested, 6)).toEqual([0, 2])
+    // On or after Ch 2 (p.8) -> top-level sibling after Ch 2.
+    expect(bookmarkInsertPath(nested, 8)).toEqual([2])
+    expect(bookmarkInsertPath(nested, 12)).toEqual([2])
   })
 })

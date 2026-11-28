@@ -890,8 +890,8 @@ fn basis(engine: &PdfiumEngine, entry: &mut OpenDocument) -> Result<Basis, Strin
                     let bytes = entry.document.save_to_bytes().map_err(|error| {
                         format!("PDFium could not rewrite the document: {error}")
                     })?;
-                    match entry.outline_edits.as_deref() {
-                        Some(edits) => outline::apply_outline_edits(bytes, edits)?,
+                    match entry.resolved_outline_edits() {
+                        Some(edits) => outline::apply_outline_edits(bytes, &edits)?,
                         None => bytes,
                     }
                 }

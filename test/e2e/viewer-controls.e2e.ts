@@ -132,7 +132,8 @@ describe("TFolio viewer controls", () => {
   // macOS lets Liquid Glass through the docked sidebar alone, while Windows 11
   // layers Mica across the window with distinct surface tints and acrylic menus;
   // in both modes a modal turns translucent surfaces solid so its blurred copy
-  // never leaves sharp UI words showing through.
+  // never leaves sharp UI words showing through. A menu's acrylic is a filter
+  // over a solid ground for the same reason.
   it("layers native materials per platform and turns them solid under a modal", async () => {
     const isSolid = (selector: string, token: string) =>
       browser.execute(
@@ -182,7 +183,7 @@ describe("TFolio viewer controls", () => {
       ).toBe(false)
 
       // Windows 11 Mica: sidebar, chrome, and workspace layer distinct tints
-      // over Mica, turn solid under a modal, and menus render with acrylic blur.
+      // over Mica, turn solid under a modal, and menus wear the acrylic filter.
       await browser.execute(() => {
         document.documentElement.dataset.nativeMaterial = "mica"
       })
@@ -208,16 +209,22 @@ describe("TFolio viewer controls", () => {
       expect(distinctGrounds).toBe(true)
 
       const settingsItem = await appMenuItem("settings")
-      const menuHasBlur = await browser.execute(() => {
+      // Tinted by the filter alone: a background under it would tint twice.
+      const menuMaterial = await browser.execute(() => {
         const menu = document.querySelector<HTMLElement>("[data-slot='dropdown-menu-content']")
-        if (!menu) return false
+        if (!menu || !(document.getElementById("acrylic") instanceof SVGFilterElement)) {
+          return "missing"
+        }
         const style = getComputedStyle(menu)
         const filter =
           style.getPropertyValue("backdrop-filter") ||
           style.getPropertyValue("-webkit-backdrop-filter")
-        return filter.includes("blur(")
+        if (!filter.includes("#acrylic")) return `filter ${filter}`
+        return style.backgroundColor === "rgba(0, 0, 0, 0)"
+          ? "acrylic"
+          : `background ${style.backgroundColor}`
       })
-      expect(menuHasBlur).toBe(true)
+      expect(menuMaterial).toBe("acrylic")
 
       await settingsItem.click()
       await $("[data-slot='dialog-content']").waitForDisplayed({ timeout: 15_000 })

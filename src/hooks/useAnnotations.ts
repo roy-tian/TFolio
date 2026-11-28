@@ -2,6 +2,7 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Channel, invoke } from "@tauri-apps/api/core"
 
 import {
+  canAddBookmark,
   canRedo,
   canRenameBookmark,
   canUndo,
@@ -17,6 +18,7 @@ import {
   nextRedoCommand,
   nextUndoCommand,
   pageNumbersConfig as currentPageNumbersConfig,
+  planAddBookmark,
   planDeleteBookmark,
   planDeletePages,
   planDuplicatePages,
@@ -332,6 +334,19 @@ async function applyCommand(
         commandPageChange(command, false),
       )
       return []
+    case "addBookmark":
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("add_pdf_bookmark", {
+          documentId,
+          pageNumber: command.pageNumber,
+          path: command.path,
+          sectionId: command.sectionId ?? null,
+          title: command.title,
+        }),
+        commandPageChange(command, false),
+      )
+      return []
     case "renameBookmark":
       onStructureChange(
         documentId,
@@ -527,6 +542,18 @@ async function retractCommand(
           documentId,
           sectionId: command.sectionId,
           title: command.previous,
+        }),
+        commandPageChange(command, true),
+      )
+      return []
+    case "addBookmark":
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("delete_pdf_bookmark", {
+          documentId,
+          path: command.path,
+          sectionId: command.sectionId ?? null,
+          stashId: null,
         }),
         commandPageChange(command, true),
       )
@@ -1261,6 +1288,28 @@ export function useAnnotations({
     [commitFileChange, signedChangeReady],
   )
 
+  const addBookmark = useCallback(
+    async (path: number[], pageNumber: number, title: string, sectionId?: number) => {
+      const pageCount = getPageCountRef.current?.() ?? 0
+
+      if (!canAddBookmark(path, pageNumber, pageCount, title)) {
+        return false
+      }
+
+      return commitBookmarkChange((current) =>
+        planAddBookmark(
+          current,
+          path,
+          pageNumber,
+          getPageCountRef.current?.() ?? pageCount,
+          title,
+          sectionId,
+        ),
+      )
+    },
+    [commitBookmarkChange],
+  )
+
   const renameBookmark = useCallback(
     async (path: number[], title: string, previous: string, sectionId?: number) => {
       if (!canRenameBookmark(path, title, previous)) {
@@ -1987,6 +2036,7 @@ export function useAnnotations({
 
   return useMemo(
     () => ({
+      addBookmark,
       canRedo: canRedo(history) && !isBusy,
       canUndo: canUndo(history) && !isBusy,
       cancelOperation,
@@ -2032,6 +2082,7 @@ export function useAnnotations({
       watermarkConfig: currentWatermarkConfig(history),
     }),
     [
+      addBookmark,
       cancelOperation,
       commitCommand,
       deleteBookmark,

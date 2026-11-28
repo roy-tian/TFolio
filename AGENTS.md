@@ -114,17 +114,25 @@
 
 ## WebView UI
 
-- Ship no `group-has-*`, `peer-has-*`, `group-focus-within-*`, `space-*`, `divide-*` or
-  `*:last:`, even from registry snippets or class names in comments: each makes WebView2 or
-  WebKit restyle the whole document per DOM change or focus. Ship no breakpoint wider than the
+- Ship no `group-has-*`, `peer-has-*`, `group-focus-within-*`, `space-*`, `divide-*`,
+  `*:last:` or a `has-[…]` holding a combinator (`has-[a_b]`), even from registry snippets or
+  class names in comments: each makes WebView2 or WebKit restyle the whole document, or
+  re-check the rule everywhere, per DOM change or focus. Ship no breakpoint wider than the
   window's `minWidth` either (`sm:` is the widest; no `md:` and up, no `container`): Chromium
   restyles everything when a resize flips one. `toolbar-tooltips.e2e.ts` guards.
+- `--sidebar-width` and `--sidebar-inset` are registered and not inherited: an element placed by
+  them takes `useSidebarSized`'s ref, or it reads their initial values. Set on the workspace
+  root, every width change restyled the whole window.
 - Smooth jumps (`scrollIntoView` and the like) take WebKit's 200 ms however far. WebView2's
   own grows to 1.5 s, so `tauri.conf.json`'s `additionalBrowserArgs` caps it at the same 200 ms.
   That setting replaces wry's default `--disable-features` list, so it restates that list too.
 - The borderless window keeps its outer 5px for resizing on Linux: no pointer event reaches the
   WebView there, so a bar or handle at the edge sits clear of it, and a native-pointer move
   aimed there shows nothing.
+- Menus are the platform's. On macOS they are AppKit's own (`popupNativeContextMenu`;
+  `useNativeDropdown` for a `DropdownMenu`), the WebView's only once that popup fails. On
+  Windows 11, menus and popovers wear `#acrylic` (`index.html`), a backdrop filter that lays its
+  blur on a solid ground: a CSS blur leaves the sharp original showing wherever Mica shows.
 - Corner messages go through `src/lib/notices.ts`; an error about a control still on screen stays
   beside it.
 - A control that cannot act stays on screen, greyed: no hover ground, the not-allowed cursor, and a

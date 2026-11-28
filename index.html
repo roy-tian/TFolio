@@ -10,6 +10,39 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Windows 11's menu acrylic, for `backdrop-filter: url(#acrylic)` in
+         index.css, which also colours the floods. -->
+    <svg aria-hidden="true" class="acrylic-defs" focusable="false" height="0" width="0">
+      <filter
+        color-interpolation-filters="sRGB"
+        height="100%"
+        id="acrylic"
+        width="100%"
+        x="0"
+        y="0"
+      >
+        <feGaussianBlur edgeMode="duplicate" result="blur" stdDeviation="30" />
+        <feFlood class="acrylic-fallback" result="fallback" />
+        <feComposite in="blur" in2="fallback" operator="over" result="ground" />
+        <feFlood class="acrylic-luminosity" result="luminosityTint" />
+        <feBlend in="luminosityTint" in2="ground" mode="luminosity" result="luminosity" />
+        <feFlood class="acrylic-tint" result="colorTint" />
+        <feBlend in="colorTint" in2="luminosity" mode="color" result="tinted" />
+        <feTurbulence
+          baseFrequency="0.75"
+          result="turbulence"
+          stitchTiles="stitch"
+          type="fractalNoise"
+        />
+        <feColorMatrix
+          in="turbulence"
+          result="noise"
+          type="matrix"
+          values="0.33 0.33 0.33 0 0  0.33 0.33 0.33 0 0  0.33 0.33 0.33 0 0  0 0 0 0 0.02"
+        />
+        <feComposite in="noise" in2="tinted" operator="over" />
+      </filter>
+    </svg>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

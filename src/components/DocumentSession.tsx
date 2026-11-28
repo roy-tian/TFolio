@@ -58,7 +58,7 @@ import { useTextDragSelection } from "@/hooks/useTextDragSelection"
 import { usePageNumbers } from "@/hooks/usePageNumbers"
 import { useRecentView } from "@/hooks/useRecentView"
 import { useRectTool } from "@/hooks/useRectTool"
-import { useSidebar } from "@/hooks/useSidebar"
+import { useSidebar, useSidebarSized } from "@/hooks/useSidebar"
 import { useTextNoteTool } from "@/hooks/useTextNoteTool"
 import { useTextSelectAll } from "@/hooks/useTextSelectAll"
 import { useThumbnailPageOps } from "@/hooks/useThumbnailPageOps"
@@ -98,6 +98,7 @@ import { forgetDocumentText } from "@/lib/pageText"
 import { transientDocumentRefusals, workspaceOwner } from "@/lib/notices"
 import {
   foldsAfterBookmarkDelete,
+  foldsAfterBookmarkInsert,
   NO_FOLDS,
   sectionOutlineKey,
   type OutlineFolds,
@@ -475,6 +476,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       sections.length === 1 && pdfDocument.hasForeignPages ? sections[0]! : undefined
     const outline = outlineFile ? outlineFile.outline : pdfDocument.outline
     const sidebar = useSidebar()
+    const sizeColumn = useSidebarSized()
     const thumbnailsRef = useRef<PageThumbnailsHandle>(null)
     const filesTreeRef = useRef<FileSectionsTreeHandle>(null)
     // Either panel shows for any document, whatever it holds: which one is
@@ -1385,6 +1387,25 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       [annotations],
     )
 
+    const addBookmark = useCallback(
+      (
+        path: number[],
+        pageNumber: number,
+        title: string,
+        parentKey: string,
+        sectionId?: number,
+      ) => {
+        void annotations.addBookmark(path, pageNumber, title, sectionId).then((landed) => {
+          if (landed) {
+            setOutlineFolds((current) =>
+              foldsAfterBookmarkInsert(current, parentKey, path[path.length - 1]!),
+            )
+          }
+        })
+      },
+      [annotations],
+    )
+
     const renameBookmark = useCallback(
       (path: number[], title: string, previous: string, sectionId?: number) => {
         void annotations.renameBookmark(path, title, previous, sectionId)
@@ -1851,20 +1872,18 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // The reader widened the sidebar to half the window or more: what it leaves
     // the pages is too narrow for a spread. The tab shown gives book view up,
     // as a choice of the reader's, and only then: chosen again, it stays.
-    const widenedRef = useRef(sidebar.widenedToHalf)
+    const giveUpBookRef = useRef(() => {})
+    const { onWidenedToHalf } = sidebar
 
-    // Before paint, so no frame shows spreads beside the widened sidebar.
     useLayoutEffect(() => {
-      if (widenedRef.current === sidebar.widenedToHalf) {
-        return
+      giveUpBookRef.current = () => {
+        if (active && viewMode === "book") {
+          changeViewMode("single")
+        }
       }
+    })
 
-      widenedRef.current = sidebar.widenedToHalf
-
-      if (active && viewMode === "book") {
-        changeViewMode("single")
-      }
-    }, [sidebar.widenedToHalf])
+    useEffect(() => onWidenedToHalf(() => giveUpBookRef.current()), [onWidenedToHalf])
 
     const openSearch = search.openSearch
 
@@ -2495,9 +2514,13 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           {sidebarPanel === "bookmarks" && severalFiles ? (
             <FileSectionsTree
               active={active}
+              busy={annotations.isBusy}
               canPaste={canPastePages}
               currentPage={currentPage}
               folds={outlineFolds}
+              onAddBookmark={(sectionId, path, pageNumber, title, parentKey) =>
+                addBookmark(path, pageNumber, title, parentKey, sectionId)
+              }
               onDeleteBookmark={(sectionId, path, parentKey, index) =>
                 deleteBookmark(path, parentKey, index, sectionId)
               }
@@ -2517,9 +2540,13 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           ) : sidebarPanel === "bookmarks" ? (
             <BookmarkList
               active={active}
+              busy={annotations.isBusy}
               currentPage={currentPage}
               folds={outlineFolds}
               items={outline}
+              onAddBookmark={(path, pageNumber, title, parentKey) =>
+                addBookmark(path, pageNumber, title, parentKey, outlineFile?.id)
+              }
               onDeleteBookmark={(path, parentKey, index) =>
                 deleteBookmark(path, parentKey, index, outlineFile?.id)
               }
@@ -2647,7 +2674,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           </div>
         ) : null}
 
-        <div className="flex h-full pt-[calc(var(--toolbar-height)+var(--document-tabs-height))] pb-(--status-bar-height) pl-(--sidebar-inset)">
+        <div
+          className="flex h-full pt-[calc(var(--toolbar-height)+var(--document-tabs-height))] pb-(--status-bar-height) pl-(--sidebar-inset)"
+          ref={sizeColumn}
+        >
           {/* The viewer's scroll box cannot host the readout or the bars:
               anything absolute inside it is placed against scrolled content
               and would drift. */}

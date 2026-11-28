@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 
 import {
+  canAddBookmark,
   canRedo,
   canRenameBookmark,
   canUndo,
@@ -19,6 +20,7 @@ import {
   nextRedoCommand,
   nextUndoCommand,
   pageNumbersConfig,
+  planAddBookmark,
   planDeleteBookmark,
   planDeletePages,
   planDuplicatePages,
@@ -226,6 +228,7 @@ describe("pageNumbersConfig", () => {
       sectionId: 1,
       title: "b.pdf",
     })
+    const afterBookmarkAdd = planAddBookmark(applied, [0], 2, 3, "Chapter 2")!.history
     const afterBookmarkRename = planRenameBookmark(applied, [0], "Ch 1", "Chapter 1")!.history
     const afterBookmarkDelete = planDeleteBookmark(applied, [0])!.history
     const afterWatermarkOnly = commit(applied, watermark(defaultWatermarkConfig("DRAFT")))
@@ -235,6 +238,7 @@ describe("pageNumbersConfig", () => {
     expect(planPageNumbersChange(afterPadding, first, 3)).not.toBeNull()
     expect(planPageNumbersChange(afterBlankThenWatermark, first, 4)).not.toBeNull()
     expect(planPageNumbersChange(afterRename, first, 3)).toBeNull()
+    expect(planPageNumbersChange(afterBookmarkAdd, first, 3)).toBeNull()
     expect(planPageNumbersChange(afterBookmarkRename, first, 3)).toBeNull()
     expect(planPageNumbersChange(afterBookmarkDelete, first, 3)).toBeNull()
     expect(planPageNumbersChange(afterWatermarkOnly, first, 3)).toBeNull()
@@ -829,6 +833,32 @@ describe("insertPagesRange", () => {
 })
 
 describe("bookmark edits", () => {
+  it("plans a trimmed add and rejects invalid path, page number, or empty title", () => {
+    const planned = planAddBookmark(emptyHistory, [0, 1], 2, 5, "  Section 1.2  ", 3)!
+
+    expect(planned.command).toEqual({
+      kind: "addBookmark",
+      pageNumber: 2,
+      path: [0, 1],
+      sectionId: 3,
+      title: "Section 1.2",
+    })
+    expect(commandPages(planned.command)).toEqual([])
+    expect(commandTextPages(planned.command)).toEqual([])
+    expect(movesPages(planned.command)).toBe(false)
+    expect(commandPageChange(planned.command, false)).toEqual({ movement: "inPlace" })
+    expect(commandPageChange(planned.command, true)).toEqual({ movement: "inPlace" })
+    expect(canAddBookmark([], 1, 3, "Title")).toBe(false)
+    expect(canAddBookmark([0], 0, 3, "Title")).toBe(false)
+    expect(canAddBookmark([0], 4, 3, "Title")).toBe(false)
+    expect(canAddBookmark([0], 1.5, 3, "Title")).toBe(false)
+    expect(canAddBookmark([0], 1, 3, "   ")).toBe(false)
+    expect(canAddBookmark([0], 2, 3, "Title")).toBe(true)
+    expect(planAddBookmark(emptyHistory, [], 1, 3, "Title")).toBeNull()
+    expect(planAddBookmark(emptyHistory, [0], 0, 3, "Title")).toBeNull()
+    expect(planAddBookmark(emptyHistory, [0], 1, 3, "   ")).toBeNull()
+  })
+
   it("plans a trimmed rename and skips empty, empty-path, or unchanged titles", () => {
     const planned = planRenameBookmark(emptyHistory, [0, 1], "  New title  ", "Old title", 2)!
 

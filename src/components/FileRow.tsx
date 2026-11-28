@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, type ComponentProps } from "react"
 import { Pencil, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
@@ -7,10 +8,48 @@ import { Button } from "@/components/ui/button"
 /** A file's row under its name, the same over the pages and in the outline.
     The row sets a property because the count is no child of the buttons that
     take its place (see `PAPER_CONTROLS_HOST`); the keyboard's focus sets it
-    too, from inside the buttons alone: WebKitGTK can keep a clicked name
-    `:focus-visible`, and its row would stay lit. */
+    too, from inside the buttons alone (`RowTools`): WebKitGTK can keep a
+    clicked name `:focus-visible`, and its row would stay lit. */
 export const FILE_ROW_CLASS =
-  "relative flex items-center gap-1 rounded-md pr-1 [--row-tools:0] hover:bg-sidebar-accent hover:[--row-tools:1] has-[[data-file-row-tools]_:focus-visible]:bg-sidebar-accent has-[[data-file-row-tools]_:focus-visible]:[--row-tools:1]"
+  "relative flex items-center gap-1 rounded-md pr-1 [--row-tools:0] hover:bg-sidebar-accent hover:[--row-tools:1] data-tools-focus:bg-sidebar-accent data-tools-focus:[--row-tools:1]"
+
+/**
+ * A row's own buttons, a child of the row, which they mark `data-tools-focus`
+ * while the keyboard is on one of them. A `:has()` rule reaching into the row
+ * for its `:focus-visible` made WebKit check every such rule on each node
+ * added anywhere: 1.3 ms a node with the pages shown, 16 ms beside a
+ * 615-bookmark outline, and a page's text adds thousands.
+ */
+export function RowTools({ children, ...props }: ComponentProps<"div">) {
+  const ref = useRef<HTMLDivElement>(null)
+
+  // Taken away with the focus in it, as a rename does, it hears no blur.
+  useLayoutEffect(() => {
+    const row = ref.current?.parentElement
+
+    return () => row?.removeAttribute("data-tools-focus")
+  }, [])
+
+  return (
+    <div
+      {...props}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          event.currentTarget.parentElement?.removeAttribute("data-tools-focus")
+        }
+      }}
+      onFocus={(event) => {
+        event.currentTarget.parentElement?.toggleAttribute(
+          "data-tools-focus",
+          (event.target as Element).matches(":focus-visible"),
+        )
+      }}
+      ref={ref}
+    >
+      {children}
+    </div>
+  )
+}
 
 /** The pressable name: as wide as the row lets it, its count at the end. */
 export const FILE_ROW_NAME_CLASS =
@@ -52,7 +91,7 @@ export function FileRowTools({
   const removeLabel = t("sidebar.removeFile", { name })
 
   return (
-    <div
+    <RowTools
       className="absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-(--row-tools)"
       data-file-row-tools
       data-slot={`${slot}-tools`}
@@ -82,6 +121,6 @@ export function FileRowTools({
           <X />
         </Button>
       </HintTooltip>
-    </div>
+    </RowTools>
   )
 }

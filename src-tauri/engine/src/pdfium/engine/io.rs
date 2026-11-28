@@ -123,7 +123,7 @@ impl StagedFile {
 enum Staging {
     Staged(StagedFile),
     Outlined(Vec<u8>, Vec<OutlineNode>),
-    EditedOutline(Vec<u8>, Vec<outline::EditableOutlineItem>),
+    EditedOutline(Vec<u8>, Vec<outline::ResolvedOutlineItem>),
 }
 
 impl Drop for StagedFile {
@@ -534,7 +534,7 @@ impl PdfiumEngine {
             "this document was opened from bytes, so there is no file to save over".to_string()
         })?;
         let (version, loaded_len) = (entry.content_version, entry.loaded_len);
-        let edits = entry.outline_edits.clone();
+        let edits = entry.resolved_outline_edits();
 
         if let Some(edits) = edits {
             let bytes = self.document_bytes(entry)?;
@@ -686,7 +686,7 @@ impl PdfiumEngine {
         // So do an added file's pages left alone: PDFium's outline is still
         // the document's own, aimed at pages that may all be gone.
         let staging = match entry.save_as_layout() {
-            None => match entry.outline_edits.clone() {
+            None => match entry.resolved_outline_edits() {
                 Some(edits) => Staging::EditedOutline(self.document_bytes(entry)?, edits),
                 None => Staging::Staged(self.stage_document(entry, path)?),
             },

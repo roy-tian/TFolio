@@ -43,6 +43,16 @@ pub(super) struct SectionBookmark {
     children: Vec<SectionBookmark>,
 }
 
+impl SectionBookmark {
+    pub(super) fn new(title: String, page_id: Option<u64>) -> Self {
+        Self {
+            title,
+            page_id,
+            children: Vec::new(),
+        }
+    }
+}
+
 /// A blank page a Save As will add, after 1-based page `after`, as large as
 /// that page shows.
 #[derive(Clone, Debug, Serialize)]

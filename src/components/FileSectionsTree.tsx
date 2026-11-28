@@ -11,7 +11,7 @@ import {
 import { ChevronRight, FileText } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import { BookmarkItems } from "@/components/BookmarkList"
+import { BookmarkItems, type DraftBookmark } from "@/components/BookmarkList"
 import {
   FILE_ROW_CLASS,
   FILE_ROW_NAME_CLASS,
@@ -30,12 +30,21 @@ import {
 import { dropEdgeOrigin, SidebarDropEdge } from "@/components/SidebarFileDrop"
 import { OutlineBar } from "@/components/SidebarPanelTools"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
-import { useCurrentPageSelector, type CurrentPage } from "@/hooks/useCurrentPage"
+import type { CurrentPage } from "@/hooks/useCurrentPage"
 import { useFollowOutlineRow } from "@/hooks/useFollowCurrentPage"
 import { useListDrag } from "@/hooks/useListDrag"
+import {
+  OutlineActiveContext,
+  useDerivedOutlineActive,
+  useOutlineActive,
+  useOutlineActiveKey,
+  type OutlineActive,
+} from "@/hooks/useOutlineActive"
 import { useDropEdgeScroll, useSidebarDrop, useSidebarDropPoint } from "@/hooks/useSidebarDrop"
 import {
   activeFileOutlineTarget,
+  bookmarkInsertPath,
+  bookmarkParentKey,
   fileFoldKey,
   fileRunKey,
   foldableBookmarks,
@@ -43,6 +52,7 @@ import {
   nestsBookmarks,
   sectionOutlineKey,
   toggledFold,
+  unfoldBookmarkAncestors,
   type OutlineFolds,
 } from "@/lib/outlineFolds"
 import { DRAG_CLICK_WINDOW, dropGapForRow } from "@/lib/pageDrag"
@@ -60,10 +70,18 @@ export type FileSectionsTreeHandle = {
 
 type FileSectionsTreeProps = {
   active: boolean
+  busy?: boolean
   canPaste: boolean
   currentPage: CurrentPage
   /** The files folded to their names, and their bookmarks folded, by key. */
   folds: OutlineFolds
+  onAddBookmark: (
+    sectionId: number,
+    path: number[],
+    pageNumber: number,
+    title: string,
+    parentKey: string,
+  ) => void
   onDeleteBookmark: (sectionId: number, path: number[], parentKey: string, index: number) => void
   onFoldsChange: (folds: OutlineFolds) => void
   /** A file dragged among the others: its pages go, whole, in front of
@@ -80,6 +98,9 @@ type FileSectionsTreeProps = {
   ref?: Ref<FileSectionsTreeHandle>
   sections: PdfSection[]
 }
+
+const bookmarkOfTarget = (target: string | null) =>
+  target?.startsWith("bookmark:") ? target.slice("bookmark:".length) : null
 
 /** The runs down the list, each by its name's row (not its bookmarks below)
     and the page it starts on, 1-based. */
@@ -111,9 +132,11 @@ function runLanding(list: HTMLUListElement, y: number | null) {
  */
 export function FileSectionsTree({
   active,
+  busy = false,
   canPaste,
   currentPage,
   folds,
+  onAddBookmark,
   onDeleteBookmark,
   onFoldsChange,
   onMove,
@@ -132,9 +155,25 @@ export function FileSectionsTree({
     key: string
     sections: PdfSection[]
   } | null>(null)
+  const [draftState, setDraftState] = useState<{
+    pageNumber: number
+    pages: PdfPageInfo[]
+    path: number[]
+    sectionId: number
+    sections: PdfSection[]
+  } | null>(null)
   const editing = editingState && editingState.sections === sections ? editingState.key : null
+  const draft =
+    draftState && draftState.sections === sections && draftState.pages === pages
+      ? draftState
+      : null
   const setEditing = useCallback(
-    (key: string | null) => setEditingState(key === null ? null : { key, sections }),
+    (key: string | null) => {
+      if (key !== null) {
+        setDraftState(null)
+      }
+      setEditingState(key === null ? null : { key, sections })
+    },
     [sections],
   )
   const listRef = useRef<HTMLUListElement>(null)
@@ -160,6 +199,54 @@ export function FileSectionsTree({
     () => new Map(sections.map((section) => [section.id, section])),
     [sections],
   )
+  const startAdd = useCallback(() => {
+    if (busy || draft !== null) {
+      return
+    }
+
+    const pageNumber = currentPage.get()
+    const sectionId = pages[pageNumber - 1]?.section
+    const section = sectionId === undefined ? undefined : files.get(sectionId)
+
+    if (!section || sectionId === undefined) {
+      return
+    }
+
+    const path = bookmarkInsertPath(section.outline, pageNumber)
+    const unfolded = unfoldBookmarkAncestors(
+      folds,
+      sectionOutlineKey(sectionId),
+      path,
+      sectionId,
+    )
+
+    if (unfolded !== folds) {
+      onFoldsChange(unfolded)
+    }
+
+    setEditingState(null)
+    setDraftState({ pageNumber, pages, path, sectionId, sections })
+  }, [busy, currentPage, draft, files, folds, onFoldsChange, pages, sections])
+  const commitDraft = useCallback(
+    (title: string | null) => {
+      const current = draft
+
+      setDraftState(null)
+
+      if (!current || title === null || title.trim() === "") {
+        return
+      }
+
+      onAddBookmark(
+        current.sectionId,
+        current.path,
+        current.pageNumber,
+        title.trim(),
+        bookmarkParentKey(sectionOutlineKey(current.sectionId), current.path),
+      )
+    },
+    [draft, onAddBookmark],
+  )
   const filePages = useMemo(() => {
     const counts = new Map<number, number>()
 
@@ -171,7 +258,7 @@ export function FileSectionsTree({
   }, [runs])
 
   const { drag } = useListDrag({
-    active: editing === null,
+    active: editing === null && draft === null,
     listRef,
     onReorder: (moved, to) => {
       const from = moved[0]!
@@ -191,11 +278,10 @@ export function FileSectionsTree({
     },
     [files, folds, runs],
   )
-  const activeTargetKey = useCurrentPageSelector(currentPage, targetKeyForPage)
+  const outlineActive = useOutlineActive(currentPage, targetKeyForPage)
+  const activeTargetKey = useOutlineActiveKey(outlineActive)
   const activeFileKey = activeTargetKey?.startsWith("file:") ? activeTargetKey.slice(5) : null
-  const activeBookmarkKey = activeTargetKey?.startsWith("bookmark:")
-    ? activeTargetKey.slice(9)
-    : null
+  const bookmarksActive = useDerivedOutlineActive(outlineActive, bookmarkOfTarget)
 
   useFollowOutlineRow({
     active,
@@ -203,7 +289,7 @@ export function FileSectionsTree({
     currentPage,
     keyForPage: targetKeyForPage,
     navRef,
-    paused: drag !== null || editing !== null,
+    paused: drag !== null || editing !== null || draft !== null,
   })
 
   // A file's bookmarks stand under its first run alone, so it folds once.
@@ -222,6 +308,13 @@ export function FileSectionsTree({
   return (
     <div className="flex h-full flex-col">
       <OutlineBar
+        add={{
+          active: draft !== null,
+          disabled: busy,
+          disabledLabel: t("annotate.historyBusy"),
+          label: t("bookmarks.add"),
+          onAdd: startAdd,
+        }}
         fold={{
           canFold: foldAll.canFold,
           canUnfold: foldAll.canUnfold,
@@ -249,8 +342,10 @@ export function FileSectionsTree({
               return (
                 <FileRunRow
                   active={activeFileKey === rowKey}
-                  activeBookmark={activeBookmarkKey}
+                  bookmarksActive={bookmarksActive}
+                  busy={busy}
                   canPaste={canPaste}
+                  draft={run.leads && draft?.sectionId === section.id ? draft : null}
                   dragging={drag !== null}
                   editing={editing === rowKey}
                   editingKey={editing}
@@ -259,7 +354,9 @@ export function FileSectionsTree({
                   index={index}
                   key={rowKey}
                   lifted={drag?.index === index}
+                  navRef={navRef}
                   offset={drag?.cellOffsets[index] ?? 0}
+                  onCommitDraft={commitDraft}
                   onDeleteBookmark={onDeleteBookmark}
                   onEdit={(on) => setEditing(on ? rowKey : null)}
                   onEditKey={setEditing}
@@ -306,11 +403,15 @@ export function FileSectionsTree({
   )
 }
 
+const NO_BOOKMARKS: PdfSection["outline"] = []
+
 /** One run of a file's pages, under the file's name. */
 function FileRunRow({
   active,
-  activeBookmark,
+  bookmarksActive,
+  busy,
   canPaste,
+  draft,
   dragging,
   editing,
   editingKey,
@@ -318,7 +419,9 @@ function FileRunRow({
   folds,
   index,
   lifted,
+  navRef,
   offset,
+  onCommitDraft,
   onDeleteBookmark,
   onEdit,
   onEditKey,
@@ -335,8 +438,10 @@ function FileRunRow({
   section,
 }: {
   active: boolean
-  activeBookmark: string | null
+  bookmarksActive: OutlineActive
+  busy: boolean
   canPaste: boolean
+  draft: DraftBookmark | null
   dragging: boolean
   editing: boolean
   editingKey: string | null
@@ -344,7 +449,9 @@ function FileRunRow({
   folds: OutlineFolds
   index: number
   lifted: boolean
+  navRef: RefObject<HTMLElement | null>
   offset: number
+  onCommitDraft: (title: string | null) => void
   onDeleteBookmark: (sectionId: number, path: number[], parentKey: string, index: number) => void
   onEdit: (editing: boolean) => void
   onEditKey: (key: string | null) => void
@@ -365,8 +472,29 @@ function FileRunRow({
   const nameRef = useRef<HTMLSpanElement>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   // The file's own bookmarks stand under its first run, as a Save As writes them.
-  const outline = run.leads ? section.outline : []
-  const open = !dragging && !folded && outline.length > 0
+  const outline = run.leads ? section.outline : NO_BOOKMARKS
+  const open = !dragging && !folded && (outline.length > 0 || draft !== null)
+  // Kept as they are while the reader passes bookmarks, which then render
+  // only the rows they light and leave.
+  const deleteBookmark = useCallback(
+    (path: number[], parentKey: string, bookmarkIndex: number) =>
+      onDeleteBookmark(section.id, path, parentKey, bookmarkIndex),
+    [onDeleteBookmark, section.id],
+  )
+  const editBookmark = useCallback(
+    (key: string | null) => {
+      if (key !== null && busy) {
+        return
+      }
+      onEditKey(key)
+    },
+    [busy, onEditKey],
+  )
+  const renameBookmark = useCallback(
+    (path: number[], title: string, previous: string) =>
+      onRenameBookmark(section.id, path, title, previous),
+    [onRenameBookmark, section.id],
+  )
 
   return (
     <li
@@ -503,23 +631,24 @@ function FileRunRow({
       </ContextMenu>
       {open ? (
         <ul className="pl-5">
-          <BookmarkItems
-            activeKey={activeBookmark}
-            editingKey={editingKey}
-            folds={folds}
-            items={outline}
-            onDelete={(path, parentKey, bookmarkIndex) =>
-              onDeleteBookmark(section.id, path, parentKey, bookmarkIndex)
-            }
-            onEdit={onEditKey}
-            onFoldsChange={onFoldsChange}
-            onNavigate={onNavigateBookmark}
-            onRename={(path, title, previous) =>
-              onRenameBookmark(section.id, path, title, previous)
-            }
-            parentKey={sectionOutlineKey(section.id)}
-            tree={nestsBookmarks(outline)}
-          />
+          <OutlineActiveContext.Provider value={bookmarksActive}>
+            <BookmarkItems
+              busy={busy}
+              draft={draft}
+              editingKey={editingKey}
+              folds={folds}
+              items={outline}
+              navRef={navRef}
+              onCommitDraft={onCommitDraft}
+              onDelete={deleteBookmark}
+              onEdit={editBookmark}
+              onFoldsChange={onFoldsChange}
+              onNavigate={onNavigateBookmark}
+              onRename={renameBookmark}
+              parentKey={sectionOutlineKey(section.id)}
+              tree={nestsBookmarks(outline)}
+            />
+          </OutlineActiveContext.Provider>
         </ul>
       ) : null}
     </li>
