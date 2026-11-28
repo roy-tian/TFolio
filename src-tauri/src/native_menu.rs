@@ -145,8 +145,20 @@ pub enum NativeContextMenuItem {
         label: String,
         #[serde(default = "default_true")]
         enabled: bool,
+        /// A choice among several (a dropdown's current one): `None` is a
+        /// plain item, never a checkable one.
+        #[serde(default)]
+        checked: Option<bool>,
     },
     Separator,
+}
+
+/// Where a popup's top-left corner goes, in logical pixels from the window's
+/// top-left: under a dropdown's trigger rather than at the pointer.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+pub struct NativeMenuPoint {
+    pub x: f64,
+    pub y: f64,
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -262,6 +274,23 @@ fn clamp_recent_entries(entries: &[RecentMenuEntry]) -> Vec<RecentMenuEntry> {
         .take(MAX_RECENT_MENU_ITEMS)
         .cloned()
         .collect()
+}
+
+/// muda reads `&` as a mnemonic marker and drops it; labels carry file names.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn escape_mnemonic(label: &str) -> String {
+    label.replace('&', "&&")
+}
+
+fn validate_menu_point(point: Option<NativeMenuPoint>) -> Result<(), String> {
+    match point {
+        Some(NativeMenuPoint { x, y })
+            if !x.is_finite() || !y.is_finite() || x.abs() > 1e6 || y.abs() > 1e6 =>
+        {
+            Err("context menu position is out of range".into())
+        }
+        _ => Ok(()),
+    }
 }
 
 fn validate_context_items(items: &[NativeContextMenuItem]) -> Result<(), String> {
@@ -482,7 +511,7 @@ fn populate_recent_submenu(
         let item = MenuItem::with_id(
             app,
             format_recent_item_id(generation, index),
-            &entry.name,
+            escape_mnemonic(&entry.name),
             true,
             None::<&str>,
         )?;
@@ -1315,8 +1344,10 @@ pub async fn popup_context_menu(
     app: AppHandle,
     window: WebviewWindow,
     items: Vec<NativeContextMenuItem>,
+    at: Option<NativeMenuPoint>,
 ) -> Result<Option<String>, String> {
     validate_context_items(&items)?;
+    validate_menu_point(at)?;
     if items.is_empty() {
         return Ok(None);
     }
@@ -1331,16 +1362,24 @@ pub async fn popup_context_menu(
         let menu = Menu::new(&app).map_err(|error| error.to_string())?;
         for item in items {
             match item {
-                NativeContextMenuItem::Item { id, label, enabled } => {
-                    let menu_item = MenuItem::with_id(
-                        &app,
-                        format_context_item_id(seq, &id),
-                        label,
-                        enabled,
-                        None::<&str>,
-                    )
-                    .map_err(|error| error.to_string())?;
-                    menu.append(&menu_item).map_err(|error| error.to_string())?;
+                NativeContextMenuItem::Item {
+                    id,
+                    label,
+                    enabled,
+                    checked,
+                } => {
+                    let id = format_context_item_id(seq, &id);
+                    let label = escape_mnemonic(&label);
+                    if let Some(checked) = checked {
+                        let menu_item =
+                            CheckMenuItem::with_id(&app, id, label, enabled, checked, None::<&str>)
+                                .map_err(|error| error.to_string())?;
+                        menu.append(&menu_item).map_err(|error| error.to_string())?;
+                    } else {
+                        let menu_item = MenuItem::with_id(&app, id, label, enabled, None::<&str>)
+                            .map_err(|error| error.to_string())?;
+                        menu.append(&menu_item).map_err(|error| error.to_string())?;
+                    }
                 }
                 NativeContextMenuItem::Separator => {
                     let sep =
@@ -1354,7 +1393,13 @@ pub async fn popup_context_menu(
             *last_popup = Some(menu.clone());
         }
 
-        if let Err(error) = window.popup_menu(&menu) {
+        let shown = match at {
+            Some(NativeMenuPoint { x, y }) => {
+                window.popup_menu_at(&menu, tauri::LogicalPosition::new(x, y))
+            }
+            None => window.popup_menu(&menu),
+        };
+        if let Err(error) = shown {
             let _ = take_context_result(&state, seq);
             return Err(error.to_string());
         }
@@ -1376,7 +1421,7 @@ pub async fn popup_context_menu(
 
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (app, window);
+        let _ = (app, window, at);
         Ok(None)
     }
 }
@@ -1629,6 +1674,7 @@ mod tests {
                 id: "copy".into(),
                 label: "Copy".into(),
                 enabled: true,
+                checked: None,
             },
             NativeContextMenuItem::Separator,
         ];
@@ -1638,6 +1684,7 @@ mod tests {
             id: String::new(),
             label: "Broken".into(),
             enabled: true,
+            checked: None,
         }];
         assert!(validate_context_items(&empty_id).is_err());
 
@@ -1646,9 +1693,59 @@ mod tests {
                 id: format!("item-{i}"),
                 label: format!("Item {i}"),
                 enabled: true,
+                checked: None,
             })
             .collect();
         assert!(validate_context_items(&too_many).is_err());
+    }
+
+    #[test]
+    fn context_items_read_checked_only_when_given() {
+        let items: Vec<NativeContextMenuItem> = serde_json::from_str(
+            r#"[
+                {"kind": "item", "id": "a", "label": "A"},
+                {"kind": "item", "id": "b", "label": "B", "checked": false},
+                {"kind": "separator"}
+            ]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            items,
+            vec![
+                NativeContextMenuItem::Item {
+                    id: "a".into(),
+                    label: "A".into(),
+                    enabled: true,
+                    checked: None,
+                },
+                NativeContextMenuItem::Item {
+                    id: "b".into(),
+                    label: "B".into(),
+                    enabled: true,
+                    checked: Some(false),
+                },
+                NativeContextMenuItem::Separator,
+            ]
+        );
+    }
+
+    #[test]
+    fn validate_menu_point_rejects_unplaceable_positions() {
+        assert!(validate_menu_point(None).is_ok());
+        assert!(validate_menu_point(Some(NativeMenuPoint { x: 12.5, y: 40.0 })).is_ok());
+        assert!(validate_menu_point(Some(NativeMenuPoint { x: -3.0, y: 0.0 })).is_ok());
+        assert!(validate_menu_point(Some(NativeMenuPoint {
+            x: f64::NAN,
+            y: 0.0
+        }))
+        .is_err());
+        assert!(validate_menu_point(Some(NativeMenuPoint { x: 0.0, y: 2e6 })).is_err());
+    }
+
+    #[test]
+    fn escape_mnemonic_keeps_ampersands_in_labels() {
+        assert_eq!(escape_mnemonic("R&D.pdf"), "R&&D.pdf");
+        assert_eq!(escape_mnemonic("Plain"), "Plain");
     }
 
     #[test]

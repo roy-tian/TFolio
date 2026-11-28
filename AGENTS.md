@@ -125,6 +125,10 @@
 - The borderless window keeps its outer 5px for resizing on Linux: no pointer event reaches the
   WebView there, so a bar or handle at the edge sits clear of it, and a native-pointer move
   aimed there shows nothing.
+- Menus are the platform's. On macOS they are AppKit's own (`popupNativeContextMenu`;
+  `useNativeDropdown` for a `DropdownMenu`), the WebView's only once that popup fails. On
+  Windows 11, menus and popovers wear `#acrylic` (`index.html`), a backdrop filter that lays its
+  blur on a solid ground: a CSS blur leaves the sharp original showing wherever Mica shows.
 - Corner messages go through `src/lib/notices.ts`; an error about a control still on screen stays
   beside it.
 - A control that cannot act stays on screen, greyed: no hover ground, the not-allowed cursor, and a

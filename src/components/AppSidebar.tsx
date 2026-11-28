@@ -20,6 +20,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Toggle } from "@/components/ui/toggle"
+import { useNativeDropdown } from "@/hooks/useNativeDropdown"
 import { useSidebar } from "@/hooks/useSidebar"
 import { hasLayerOverWorkspace } from "@/lib/contextMenu"
 import {
@@ -69,9 +70,22 @@ export function SidebarPanelSwitch({ panel }: { panel: SidebarPanel }) {
     panelOptions.find((option) => option.value === panel) ?? panelOptions[0]
   const CurrentIcon = current.icon
   const currentLabel = t(current.labelKey)
+  const menu = useNativeDropdown(() => ({
+    choose: (chosen) => {
+      if (isSidebarPanel(chosen)) {
+        sidebar.setPanel(chosen)
+      }
+    },
+    items: panelOptions.map((option) => ({
+      checked: option.value === panel,
+      id: option.value,
+      kind: "item",
+      label: t(option.labelKey),
+    })),
+  }))
 
   return (
-    <DropdownMenu>
+    <DropdownMenu {...menu}>
       {/* Only a cut-short name has more to say: a tooltip repeating the whole
           label would sit over the panel's own bar for nothing. */}
       <ToolbarTooltip cutShort={labelRef} label={currentLabel}>

@@ -306,10 +306,14 @@ body {
   --mica-chrome-mix: 62%;
   --mica-tabs-mix: 42%;
   --mica-workspace-mix: 80%;
-  --acrylic-popover-mix: 78%;
-  --acrylic-blur: 24px;
-  --acrylic-saturate: 1.5;
-  --acrylic-shadow: 0 8px 24px -4px rgb(0 0 0 / 0.14), 0 2px 6px -1px rgb(0 0 0 / 0.08);
+  /* WinUI's `AcrylicBackgroundFillColorDefaultBrush` and flyout stroke and
+     shadow, which the system's own menus wear. */
+  --acrylic-fallback: #f9f9f9;
+  --acrylic-tint: #fcfcfc;
+  --acrylic-tint-opacity: 0;
+  --acrylic-luminosity-opacity: 0.85;
+  --acrylic-shadow:
+    0 0 0 1px rgb(0 0 0 / 6%), 0 0 2px rgb(0 0 0 / 12%), 0 8px 16px rgb(0 0 0 / 14%);
 }
 
 .native-workspace.dark[data-native-material="mica"] {
@@ -317,10 +321,12 @@ body {
   --mica-chrome-mix: 52%;
   --mica-tabs-mix: 40%;
   --mica-workspace-mix: 82%;
-  --acrylic-popover-mix: 76%;
-  --acrylic-blur: 28px;
-  --acrylic-saturate: 1.6;
-  --acrylic-shadow: 0 10px 28px -4px rgb(0 0 0 / 0.45), 0 2px 8px -1px rgb(0 0 0 / 0.3);
+  --acrylic-fallback: #2c2c2c;
+  --acrylic-tint: #2c2c2c;
+  --acrylic-tint-opacity: 0.15;
+  --acrylic-luminosity-opacity: 0.96;
+  --acrylic-shadow:
+    0 0 0 1px rgb(0 0 0 / 20%), 0 0 2px rgb(0 0 0 / 24%), 0 8px 16px rgb(0 0 0 / 28%);
 }
 
 /* macOS Liquid Glass / vibrancy (also the default when `.native-workspace` is
@@ -377,29 +383,71 @@ body {
   background-color: var(--workspace-background);
 }
 
-/* Transient menus and popovers:
-   - Windows 11 (`mica`): Fluent-style in-app acrylic blur over app content.
-   - macOS (`glass`): subtle frosted tint for in-WebView popups so they
-     harmonize with AppKit's native menus while staying crisp over PDF text. */
-@supports (backdrop-filter: blur(1px)) {
-  .native-workspace[data-native-material="mica"] [data-slot="dropdown-menu-content"],
-  .native-workspace[data-native-material="mica"] [data-slot="dropdown-menu-sub-content"],
-  .native-workspace[data-native-material="mica"] [data-slot="context-menu-content"],
-  .native-workspace[data-native-material="mica"] [data-slot="context-menu-sub-content"],
-  .native-workspace[data-native-material="mica"] [data-slot="popover-content"],
-  .native-workspace[data-native-material="mica"] [data-slot="select-content"] {
-    --accent: var(--native-menu-accent);
-    background-color: color-mix(in oklab, var(--popover) var(--acrylic-popover-mix), transparent);
-    backdrop-filter: blur(var(--acrylic-blur)) saturate(var(--acrylic-saturate));
-    box-shadow: var(--acrylic-shadow);
-  }
+/* Transient menus and popovers. On Windows 11 they wear the acrylic of the
+   system's own menus (`#acrylic` in index.html). A CSS blur cannot: Chromium
+   draws its blurred copy over the sharp original, which shows through wherever
+   the WebView lets Mica through, and a dense tint over it reads as opaque
+   elsewhere. The filter lays the blur on a solid ground first. */
+.acrylic-defs {
+  position: absolute;
+}
 
-  .native-workspace[data-native-material="glass"] [data-slot="dropdown-menu-content"],
-  .native-workspace[data-native-material="glass"] [data-slot="dropdown-menu-sub-content"],
-  .native-workspace[data-native-material="glass"] [data-slot="context-menu-content"],
-  .native-workspace[data-native-material="glass"] [data-slot="context-menu-sub-content"],
-  .native-workspace[data-native-material="glass"] [data-slot="popover-content"],
-  .native-workspace[data-native-material="glass"] [data-slot="select-content"] {
+.acrylic-fallback {
+  flood-color: var(--acrylic-fallback);
+}
+
+.acrylic-luminosity {
+  flood-color: var(--acrylic-tint);
+  flood-opacity: var(--acrylic-luminosity-opacity);
+}
+
+.acrylic-tint {
+  flood-color: var(--acrylic-tint);
+  flood-opacity: var(--acrylic-tint-opacity);
+}
+
+.native-workspace[data-native-material="mica"]
+  :is(
+    [data-slot="dropdown-menu-content"],
+    [data-slot="dropdown-menu-sub-content"],
+    [data-slot="context-menu-content"],
+    [data-slot="context-menu-sub-content"],
+    [data-slot="popover-content"],
+    [data-slot="select-content"]
+  ) {
+  --accent: var(--native-menu-accent);
+  background-color: var(--acrylic-fallback);
+  box-shadow: var(--acrylic-shadow);
+}
+
+@supports (backdrop-filter: url("#acrylic")) {
+  .native-workspace[data-native-material="mica"]
+    :is(
+      [data-slot="dropdown-menu-content"],
+      [data-slot="dropdown-menu-sub-content"],
+      [data-slot="context-menu-content"],
+      [data-slot="context-menu-sub-content"],
+      [data-slot="popover-content"],
+      [data-slot="select-content"]
+    ) {
+    background-color: transparent;
+    backdrop-filter: url("#acrylic");
+  }
+}
+
+/* macOS: menus are AppKit's own (`popupNativeContextMenu`); what still opens
+   in the WebView, popovers and a menu whose native popup failed, takes a
+   frosted tint. */
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .native-workspace[data-native-material="glass"]
+    :is(
+      [data-slot="dropdown-menu-content"],
+      [data-slot="dropdown-menu-sub-content"],
+      [data-slot="context-menu-content"],
+      [data-slot="context-menu-sub-content"],
+      [data-slot="popover-content"],
+      [data-slot="select-content"]
+    ) {
     --accent: var(--native-menu-accent);
     background-color: color-mix(in oklab, var(--popover) var(--glass-popover-mix), transparent);
     -webkit-backdrop-filter: blur(20px) saturate(1.4);

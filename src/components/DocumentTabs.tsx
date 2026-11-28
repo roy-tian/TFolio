@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { useListDrag, type ListDragState } from "@/hooks/useListDrag"
+import { useNativeDropdown } from "@/hooks/useNativeDropdown"
 import type { AppendOffer } from "@/hooks/usePageCarry"
 import {
   HOME_TAB_ID,
@@ -139,6 +140,88 @@ function TabDragGhost({ drag, tab }: {
       ) : null}
     </div>,
     document.body,
+  )
+}
+
+/** Lists every tab once the strip scrolls. Its own component so its open
+    state goes with it when the strip stops scrolling. */
+function TabListMenu({
+  activeId,
+  onActivate,
+  tabs,
+}: Pick<DocumentTabsProps, "activeId" | "onActivate" | "tabs">) {
+  const { t } = useTranslation()
+  const menu = useNativeDropdown(() => ({
+    choose: (chosen) => {
+      const tab = tabs.find((candidate) => String(candidate.id) === chosen)
+      if (tab) {
+        onActivate(tab.id)
+      }
+    },
+    items: tabs.map((tab) => ({
+      checked: tab.id === activeId,
+      id: String(tab.id),
+      kind: "item",
+      label: tab.name,
+    })),
+  }))
+
+  return (
+    <DropdownMenu {...menu}>
+      <ToolbarTooltip label={t("tabs.listAll")} side="top">
+        <DropdownMenuTrigger
+          render={
+            <Button
+              aria-label={t("tabs.listAll")}
+              className="mb-0.5 shrink-0"
+              data-slot="tab-overflow-menu"
+              size="icon-sm"
+              variant="ghost"
+            />
+          }
+        >
+          <ChevronDown />
+        </DropdownMenuTrigger>
+      </ToolbarTooltip>
+      <DropdownMenuContent align="end" className="w-64">
+        {tabs.map((tab) => (
+          <DropdownMenuItem
+            className={cn(
+              "justify-between gap-2",
+              tab.id === activeId && "bg-accent/60",
+            )}
+            key={tab.id}
+            onClick={() => onActivate(tab.id)}
+          >
+            <img alt="" className="size-4 shrink-0" draggable={false} src={fileTinyIcon} />
+            <span className="min-w-0 flex-1 truncate">{tab.name}</span>
+            {signatureMark(tab.document.signatures) ? (
+              <FileSignature
+                aria-label={t(
+                  signatureMark(tab.document.signatures) === "broken"
+                    ? "signatures.brokenCount"
+                    : "signatures.count",
+                  { count: tab.document.signatures.count },
+                )}
+                className={cn(
+                  "size-3.5 shrink-0",
+                  signatureMark(tab.document.signatures) === "broken"
+                    ? "text-warning"
+                    : "text-muted-foreground",
+                )}
+                role="img"
+              />
+            ) : null}
+            {tab.dirty ? (
+              <span
+                aria-label={t("tabs.unsaved")}
+                className="size-2 shrink-0 rounded-full bg-primary"
+              />
+            ) : null}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -593,61 +676,7 @@ export function DocumentTabs({
       </ToolbarTooltip>
 
       {scrolls ? (
-        <DropdownMenu>
-          <ToolbarTooltip label={t("tabs.listAll")} side="top">
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  aria-label={t("tabs.listAll")}
-                  className="mb-0.5 shrink-0"
-                  data-slot="tab-overflow-menu"
-                  size="icon-sm"
-                  variant="ghost"
-                />
-              }
-            >
-              <ChevronDown />
-            </DropdownMenuTrigger>
-          </ToolbarTooltip>
-          <DropdownMenuContent align="end" className="w-64">
-            {tabs.map((tab) => (
-              <DropdownMenuItem
-                className={cn(
-                  "justify-between gap-2",
-                  tab.id === activeId && "bg-accent/60",
-                )}
-                key={tab.id}
-                onClick={() => onActivate(tab.id)}
-              >
-                <img alt="" className="size-4 shrink-0" draggable={false} src={fileTinyIcon} />
-                <span className="min-w-0 flex-1 truncate">{tab.name}</span>
-                {signatureMark(tab.document.signatures) ? (
-                  <FileSignature
-                    aria-label={t(
-                      signatureMark(tab.document.signatures) === "broken"
-                        ? "signatures.brokenCount"
-                        : "signatures.count",
-                      { count: tab.document.signatures.count },
-                    )}
-                    className={cn(
-                      "size-3.5 shrink-0",
-                      signatureMark(tab.document.signatures) === "broken"
-                        ? "text-warning"
-                        : "text-muted-foreground",
-                    )}
-                    role="img"
-                  />
-                ) : null}
-                {tab.dirty ? (
-                  <span
-                    aria-label={t("tabs.unsaved")}
-                    className="size-2 shrink-0 rounded-full bg-primary"
-                  />
-                ) : null}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <TabListMenu activeId={activeId} onActivate={onActivate} tabs={tabs} />
       ) : null}
 
       <div
