@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { Toggle } from "@/components/ui/toggle"
 import type { useAnnotations } from "@/hooks/useAnnotations"
-import { useSidebar } from "@/hooks/useSidebar"
+import { useSidebar, useSidebarSized } from "@/hooks/useSidebar"
 import type { HexColor, RectStyle } from "@/lib/annotations"
 import { shortcuts } from "@/lib/shortcuts"
 import { cn } from "@/lib/utils"
@@ -161,6 +161,7 @@ export function ToolbarFrame({
 }: ToolbarFrameProps) {
   const docked = useSidebar().mode === "docked"
   const barRef = useRef<HTMLElement>(null)
+  const sizeBar = useSidebarSized(barRef)
 
   useFoldingLabels(barRef)
 
@@ -171,7 +172,7 @@ export function ToolbarFrame({
       className="fixed top-0 right-0 left-(--sidebar-inset) z-40 flex h-(--toolbar-height) items-center justify-between gap-2 border-b bg-background px-2 pb-px"
       data-slot="toolbar"
       data-tauri-drag-region="deep"
-      ref={barRef}
+      ref={sizeBar}
     >
       <div
         className={cn(

@@ -6,6 +6,7 @@ import fileSmallIcon from "@/assets/brand/file-small.svg"
 import { HintTooltip, HintTooltipGroup } from "@/components/HintTooltip"
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import { SidebarDropEdge } from "@/components/SidebarFileDrop"
+import { useSidebarSized } from "@/hooks/useSidebar"
 import { useSidebarDrop } from "@/hooks/useSidebarDrop"
 import {
   HOME_TAB_ID,
@@ -81,6 +82,7 @@ export function HomePanel({
     RECENT_PAGE_SIZE,
   )
   const pageRef = useRef<HTMLElement>(null)
+  const sizePage = useSidebarSized()
   const recentListRef = useRef<HTMLUListElement>(null)
   const recentEndRef = useRef<HTMLLIElement>(null)
   const recentTotal = recentFiles.length
@@ -130,7 +132,7 @@ export function HomePanel({
           welcome and the actions never move under the reader. A margin, not
           padding, keeps this background off the native material the sidebar
           shows through. */}
-      <div className="relative ml-(--sidebar-inset) h-full">
+      <div className="relative ml-(--sidebar-inset) h-full" ref={sizePage}>
         <main
           className="overlay-scroll-viewport workspace-background h-full overflow-y-auto p-8 pt-[calc(var(--toolbar-height)+var(--document-tabs-height)+2rem)]"
           ref={pageRef}

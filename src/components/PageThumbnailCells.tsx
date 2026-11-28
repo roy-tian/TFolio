@@ -31,6 +31,12 @@ import { THUMBNAIL_CAPTION_HEIGHT, THUMBNAIL_WIDTH, thumbnailPaper } from "@/lib
 // screens would hold a long document's every preview for one scroll through.
 const RETAIN_MARGIN = "1500px 0px"
 
+// Each page's controls bring their hints and a checkbox: those of every page
+// out to the pixels kept, 57 at three columns, were half of what widening the
+// sidebar cost. A row beyond the view is enough to have them there before the
+// pointer.
+const CONTROLS_MARGIN = "320px 0px"
+
 // A blank's way in, as tall as its button, where one column's gap is narrower.
 const INSERT_SEAM = 20
 
@@ -455,21 +461,20 @@ export const PageCell = memo(function PageCell({
   const { t } = useTranslation()
   const itemRef = useRef<HTMLLIElement>(null)
   const nearView = useNearViewport(itemRef, RETAIN_MARGIN)
+  const inView = useNearViewport(itemRef, CONTROLS_MARGIN)
   // A focused control stays however far the pages scroll from it: unmounting
   // it would drop keyboard focus back to the start of the document.
   const [focusWithin, setFocusWithin] = useState(false)
   const paper = thumbnailPaper({ height: pageHeight, width: pageWidth })
-  // Each control has a tooltip; hundreds would slow every selection, so only
-  // the pages near the view have theirs.
-  const showControls = nearView || focusWithin
+  const showControls = inView || focusWithin
 
   // A control hidden or removed under focus may send no blur. Check again as
   // the page leaves the view, where a stale flag would keep its controls.
   useEffect(() => {
-    if (!nearView && focusWithin && !itemRef.current?.contains(document.activeElement)) {
+    if (!inView && focusWithin && !itemRef.current?.contains(document.activeElement)) {
       setFocusWithin(false)
     }
-  }, [focusWithin, nearView])
+  }, [focusWithin, inView])
 
   return (
     <li

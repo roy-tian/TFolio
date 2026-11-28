@@ -91,6 +91,67 @@ function focusWithinOverEveryElement(selector: string) {
   return /:focus-within(?:\s*[>~+]\s*|\s+)\*/.test(selector)
 }
 
+/** The argument of every `name(` in `selector`, its parentheses balanced. */
+function pseudoArguments(selector: string, name: string) {
+  const found: string[] = []
+  const token = `${name}(`
+  let quote: string | null = null
+
+  for (let start = 0; start < selector.length; start += 1) {
+    const char = selector[start]
+
+    if (char === "\\") {
+      start += 1
+      continue
+    }
+
+    if (quote) {
+      if (char === quote) quote = null
+      continue
+    }
+
+    if (char === "\"" || char === "'") {
+      quote = char
+      continue
+    }
+
+    if (!selector.startsWith(token, start)) continue
+
+    const from = start + token.length
+    let index = from
+    let innerQuote: string | null = null
+    let level = 1
+
+    for (; level > 0 && index < selector.length; index += 1) {
+      const next = selector[index]
+
+      if (next === "\\") index += 1
+      else if (innerQuote) {
+        if (next === innerQuote) innerQuote = null
+      } else if (next === "\"" || next === "'") innerQuote = next
+      else if (next === "(") level += 1
+      else if (next === ")") level -= 1
+    }
+
+    if (level === 0) found.push(selector.slice(from, index - 1))
+  }
+
+  return found
+}
+
+/** Whether a `:has()` holds a combinator inside `:is()` or `:where()`, as
+    Tailwind's `has-[a_b]` compiles to `:has(:is(a b))`. */
+function hasCombinatorThroughIs(selector: string) {
+  return pseudoArguments(selector, ":has").some((argument) =>
+    [...pseudoArguments(argument, ":is"), ...pseudoArguments(argument, ":where")].some((inner) =>
+      // Attribute values may hold spaces, `~`, and brackets; a comma's space is no combinator.
+      /[^\s,]\s*[>~+]|[^\s,]\s+[^\s,]/.test(
+        inner.replace(/\[(?:\\.|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\]\\])*\]/g, "[]").trim(),
+      ),
+    ),
+  )
+}
+
 describe("TFolio toolbar tooltips", () => {
   before(async () => {
     await seedSettings({ ui: { language: "zh-CN", viewMode: "single" } })
@@ -244,6 +305,18 @@ describe("TFolio toolbar tooltips", () => {
     // WebKit restyles the whole document: one group-focus-within-* made each
     // focus change on a 400-page board of thumbnails take 29 ms, against 2 ms.
     expect((await shippedSelectors()).filter(focusWithinOverEveryElement)).toEqual([])
+  })
+
+  it("ships no :has() reaching through :is() with a combinator, which WebKit checks per node", async () => {
+    // A combinator inside :is() can match outside the :has() subject, so
+    // WebKit checks every element the rule could light whenever a node is
+    // added anywhere: a bookmark row's tools lit by their :focus-visible made
+    // each node a page's text adds cost 16 ms beside a 615-bookmark outline,
+    // 2–4 µs without.
+    expect(hasCombinatorThroughIs(":has(:is([data-label=\")\"] a))")).toBe(true)
+    expect(hasCombinatorThroughIs(":has(:is([data-label=\"x\"] a))")).toBe(true)
+    expect(hasCombinatorThroughIs(":has(:is([data-label=\"a b\"]))")).toBe(false)
+    expect((await shippedSelectors()).filter(hasCombinatorThroughIs)).toEqual([])
   })
 
   it("ships no width media query a resizable window can flip", async () => {

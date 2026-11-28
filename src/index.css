@@ -232,21 +232,47 @@ body {
   background-color: var(--background);
 }
 
-/* The workspace root names where the sidebar stands; everything right of it
-   starts at the inset, which an overlay leaves at the window's edge. */
-[data-sidebar] {
+/* What the sidebar places works its width out for itself, from values set on
+   it (`sidebarWidth.ts`), none of them inherited: a width changed on the
+   workspace root restyled every element in the window. */
+@property --sidebar-chosen {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --sidebar-reserved {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --sidebar-width {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 256px;
+}
+
+@property --sidebar-inset {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+[data-sidebar-sized] {
   --sidebar-width: 16rem;
-  --sidebar-inset: 0px;
 }
 
 /* A width the reader dragged to; the window narrows it as it shrinks, so the
    pages beside a docked sidebar keep their room. In pixels, as the drag and
    `SIDEBAR_MIN_WIDTH` measure it, whatever the root font size. */
-[data-sidebar][data-sidebar-width] {
+[data-sidebar-sized][data-sidebar-width] {
   --sidebar-width: max(256px, min(var(--sidebar-chosen), 100vw - var(--sidebar-reserved)));
 }
 
-[data-sidebar="docked"] {
+/* The workspace root names where the sidebar stands; everything right of it
+   starts at the inset, which an overlay leaves at the window's edge. */
+[data-sidebar="docked"] [data-sidebar-sized] {
   --sidebar-inset: var(--sidebar-width);
 }
 

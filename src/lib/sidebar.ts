@@ -1,5 +1,3 @@
-import type { CSSProperties } from "react"
-
 import { rememberSettings, storedSettings } from "@/lib/settings"
 
 export const sidebarPanels = ["bookmarks", "thumbnails"] as const
@@ -91,17 +89,6 @@ export const THUMBNAIL_COLUMN_GAP = 12
 /** How many fixed-size previews fit across the sidebar's content box. */
 export function thumbnailColumns(contentWidth: number, cell: number) {
   return Math.max(1, Math.floor((contentWidth + THUMBNAIL_GRID_GAP) / (cell + THUMBNAIL_GRID_GAP)))
-}
-
-/** The workspace root's custom properties for a chosen width; `index.css`
-    clamps it to the window. */
-export function sidebarWidthStyle(width: number | null, reserved: number) {
-  return width === null
-    ? undefined
-    : ({
-        "--sidebar-chosen": `${width}px`,
-        "--sidebar-reserved": `${reserved}px`,
-      } as CSSProperties)
 }
 
 export function readStoredSidebarWidth() {

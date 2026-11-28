@@ -36,6 +36,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { useListDrag, type ListDragState } from "@/hooks/useListDrag"
 import { useNativeDropdown } from "@/hooks/useNativeDropdown"
+import { useSidebarSized } from "@/hooks/useSidebar"
 import type { AppendOffer } from "@/hooks/usePageCarry"
 import {
   HOME_TAB_ID,
@@ -247,6 +248,7 @@ export function DocumentTabs({
   const macOS = isMacOS()
   const scrollerRef = useRef<HTMLDivElement>(null)
   const stripRef = useRef<HTMLDivElement>(null)
+  const sizeStrip = useSidebarSized(stripRef)
   const [scrolls, setScrolls] = useState(false)
   const tabIds: TabId[] = [HOME_TAB_ID, ...tabs.map((tab) => tab.id)]
   const reorderable = tabs.length > 1
@@ -361,7 +363,7 @@ export function DocumentTabs({
     <div
       className="fixed top-(--toolbar-height) right-0 left-(--sidebar-inset) z-40 flex h-(--document-tabs-height) items-end gap-1 border-b bg-muted px-2"
       data-tab-strip
-      ref={stripRef}
+      ref={sizeStrip}
     >
       {/* The new and list actions sit outside the tablist: they are not tabs,
           and arrow-key tab navigation must not land on them. */}

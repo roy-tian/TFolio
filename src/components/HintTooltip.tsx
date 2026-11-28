@@ -1,4 +1,13 @@
-import type { ComponentProps, ReactElement, ReactNode, RefObject } from "react"
+import {
+  createContext,
+  useContext,
+  useState,
+  type ComponentProps,
+  type ReactElement,
+  type ReactNode,
+  type RefObject,
+} from "react"
+import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
 
 import {
   Tooltip,
@@ -39,12 +48,43 @@ export function HintTooltipGroup({ children }: { children: ReactNode }) {
   return <TooltipProvider delay={HINT_TOOLTIP_DELAY}>{children}</TooltipProvider>
 }
 
+type SharedHint = {
+  label: string
+  side: NonNullable<HintTooltipProps["side"]>
+  sideOffset: HintTooltipProps["sideOffset"]
+}
+
+const SharedHintContext = createContext<TooltipPrimitive.Handle<SharedHint> | null>(null)
+
+/** One tooltip for the plain hints of a long list, each hint only a trigger
+    for it: a tooltip of its own per row or page made every one of them a
+    tooltip root to render, mount and keep, hundreds at a time, as the sidebar
+    widened or the outline filled. */
+export function SharedHintTooltips({ children }: { children: ReactNode }) {
+  const [handle] = useState(() => TooltipPrimitive.createHandle<SharedHint>())
+
+  return (
+    <SharedHintContext.Provider value={handle}>
+      {children}
+      <TooltipPrimitive.Root disableHoverablePopup handle={handle}>
+        {({ payload }) =>
+          payload ? (
+            <TooltipContent side={payload.side} sideOffset={payload.sideOffset}>
+              {payload.label}
+            </TooltipContent>
+          ) : null
+        }
+      </TooltipPrimitive.Root>
+    </SharedHintContext.Provider>
+  )
+}
+
 /** What content inside the app says under a resting pointer; the bars' own
     controls answer faster — see `ToolbarTooltip`. */
 export function HintTooltip({
   children,
   cutShort,
-  disabled = false,
+  disabled,
   inDelayGroup = false,
   label,
   openOnFocus = true,
@@ -52,8 +92,26 @@ export function HintTooltip({
   sideOffset,
   trackCursorAxis,
 }: HintTooltipProps) {
+  const shared = useContext(SharedHintContext)
+
   if (!label) {
     return children
+  }
+
+  // Only a plain hint can share: the others decide per opening, or need their
+  // own root so disabling closes an open popup without remounting the trigger.
+  // A trigger takes its delay from the provider around it, as a hint of its
+  // own does.
+  if (shared && !cutShort && disabled === undefined && openOnFocus && !trackCursorAxis) {
+    const trigger = (
+      <TooltipTrigger
+        handle={shared}
+        payload={{ label, side, sideOffset }}
+        render={children}
+      />
+    )
+
+    return inDelayGroup ? trigger : <HintTooltipGroup>{trigger}</HintTooltipGroup>
   }
 
   const repeatsWhatShows = () => cutShort !== undefined && !isCutShort(cutShort.current)

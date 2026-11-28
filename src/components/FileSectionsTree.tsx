@@ -30,9 +30,16 @@ import {
 import { dropEdgeOrigin, SidebarDropEdge } from "@/components/SidebarFileDrop"
 import { OutlineBar } from "@/components/SidebarPanelTools"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
-import { useCurrentPageSelector, type CurrentPage } from "@/hooks/useCurrentPage"
+import type { CurrentPage } from "@/hooks/useCurrentPage"
 import { useFollowOutlineRow } from "@/hooks/useFollowCurrentPage"
 import { useListDrag } from "@/hooks/useListDrag"
+import {
+  OutlineActiveContext,
+  useDerivedOutlineActive,
+  useOutlineActive,
+  useOutlineActiveKey,
+  type OutlineActive,
+} from "@/hooks/useOutlineActive"
 import { useDropEdgeScroll, useSidebarDrop, useSidebarDropPoint } from "@/hooks/useSidebarDrop"
 import {
   activeFileOutlineTarget,
@@ -80,6 +87,9 @@ type FileSectionsTreeProps = {
   ref?: Ref<FileSectionsTreeHandle>
   sections: PdfSection[]
 }
+
+const bookmarkOfTarget = (target: string | null) =>
+  target?.startsWith("bookmark:") ? target.slice("bookmark:".length) : null
 
 /** The runs down the list, each by its name's row (not its bookmarks below)
     and the page it starts on, 1-based. */
@@ -191,11 +201,10 @@ export function FileSectionsTree({
     },
     [files, folds, runs],
   )
-  const activeTargetKey = useCurrentPageSelector(currentPage, targetKeyForPage)
+  const outlineActive = useOutlineActive(currentPage, targetKeyForPage)
+  const activeTargetKey = useOutlineActiveKey(outlineActive)
   const activeFileKey = activeTargetKey?.startsWith("file:") ? activeTargetKey.slice(5) : null
-  const activeBookmarkKey = activeTargetKey?.startsWith("bookmark:")
-    ? activeTargetKey.slice(9)
-    : null
+  const bookmarksActive = useDerivedOutlineActive(outlineActive, bookmarkOfTarget)
 
   useFollowOutlineRow({
     active,
@@ -249,7 +258,7 @@ export function FileSectionsTree({
               return (
                 <FileRunRow
                   active={activeFileKey === rowKey}
-                  activeBookmark={activeBookmarkKey}
+                  bookmarksActive={bookmarksActive}
                   canPaste={canPaste}
                   dragging={drag !== null}
                   editing={editing === rowKey}
@@ -306,10 +315,12 @@ export function FileSectionsTree({
   )
 }
 
+const NO_BOOKMARKS: PdfSection["outline"] = []
+
 /** One run of a file's pages, under the file's name. */
 function FileRunRow({
   active,
-  activeBookmark,
+  bookmarksActive,
   canPaste,
   dragging,
   editing,
@@ -335,7 +346,7 @@ function FileRunRow({
   section,
 }: {
   active: boolean
-  activeBookmark: string | null
+  bookmarksActive: OutlineActive
   canPaste: boolean
   dragging: boolean
   editing: boolean
@@ -365,8 +376,20 @@ function FileRunRow({
   const nameRef = useRef<HTMLSpanElement>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   // The file's own bookmarks stand under its first run, as a Save As writes them.
-  const outline = run.leads ? section.outline : []
+  const outline = run.leads ? section.outline : NO_BOOKMARKS
   const open = !dragging && !folded && outline.length > 0
+  // Kept as they are while the reader passes bookmarks, which then render
+  // only the rows they light and leave.
+  const deleteBookmark = useCallback(
+    (path: number[], parentKey: string, bookmarkIndex: number) =>
+      onDeleteBookmark(section.id, path, parentKey, bookmarkIndex),
+    [onDeleteBookmark, section.id],
+  )
+  const renameBookmark = useCallback(
+    (path: number[], title: string, previous: string) =>
+      onRenameBookmark(section.id, path, title, previous),
+    [onRenameBookmark, section.id],
+  )
 
   return (
     <li
@@ -503,23 +526,20 @@ function FileRunRow({
       </ContextMenu>
       {open ? (
         <ul className="pl-5">
-          <BookmarkItems
-            activeKey={activeBookmark}
-            editingKey={editingKey}
-            folds={folds}
-            items={outline}
-            onDelete={(path, parentKey, bookmarkIndex) =>
-              onDeleteBookmark(section.id, path, parentKey, bookmarkIndex)
-            }
-            onEdit={onEditKey}
-            onFoldsChange={onFoldsChange}
-            onNavigate={onNavigateBookmark}
-            onRename={(path, title, previous) =>
-              onRenameBookmark(section.id, path, title, previous)
-            }
-            parentKey={sectionOutlineKey(section.id)}
-            tree={nestsBookmarks(outline)}
-          />
+          <OutlineActiveContext.Provider value={bookmarksActive}>
+            <BookmarkItems
+              editingKey={editingKey}
+              folds={folds}
+              items={outline}
+              onDelete={deleteBookmark}
+              onEdit={onEditKey}
+              onFoldsChange={onFoldsChange}
+              onNavigate={onNavigateBookmark}
+              onRename={renameBookmark}
+              parentKey={sectionOutlineKey(section.id)}
+              tree={nestsBookmarks(outline)}
+            />
+          </OutlineActiveContext.Provider>
         </ul>
       ) : null}
     </li>

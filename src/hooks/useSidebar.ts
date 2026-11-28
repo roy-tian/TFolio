@@ -2,10 +2,11 @@ import {
   createContext,
   useCallback,
   useContext,
+  useLayoutEffect,
   useMemo,
-  useRef,
   useState,
   useSyncExternalStore,
+  type RefObject,
 } from "react"
 
 import {
@@ -23,6 +24,7 @@ import {
   type SidebarMode,
   type SidebarPanel,
 } from "@/lib/sidebar"
+import { createSidebarWidthStore, type SidebarWidthStore } from "@/lib/sidebarWidth"
 import { VIEWER_WILL_MOVE_EVENT } from "@/lib/viewerViewport"
 
 export type SidebarState = {
@@ -35,21 +37,26 @@ export type SidebarState = {
   setPanel: (panel: SidebarPanel) => void
   /** Stores the width last set without storing. */
   persistWidth: () => void
+  /** Calls `listener` each time the reader widens the docked sidebar to half
+      the window or more — a drag let go, an arrow, a double-click — so the
+      pages beside it, left half or less, can give up book view. A window's own
+      resize is none. Told inside the reader's event, before the next paint. */
+  onWidenedToHalf: (listener: () => void) => () => void
   /** Settles a width the reader chose; null goes back to the opening width.
       `persist: false` leaves the file alone until `persistWidth`, so a held
       arrow key writes the settings once, not at the key's repeat rate. */
   setWidth: (width: number | null, persist?: boolean) => void
   toggle: () => void
-  /** The reader's width before the window clamps it, or null for the
-      opening width. */
-  width: number | null
-  /** Counts the reader's widenings of the docked sidebar to half the window or
-      more — a drag let go, an arrow, a double-click — so the pages beside it,
-      left half or less, can give up book view. A window's own resize is none. */
-  widenedToHalf: number
+  /** The width, which only the elements it places follow
+      (`SidebarWidthContext`). */
+  widthStore: SidebarWidthStore
 }
 
 export const SidebarContext = createContext<SidebarState | null>(null)
+
+/** The width alone, which never changes identity: what reads it renders on
+    nothing else the sidebar does. */
+export const SidebarWidthContext = createContext<SidebarWidthStore | null>(null)
 
 export function useSidebar() {
   const sidebar = useContext(SidebarContext)
@@ -59,6 +66,52 @@ export function useSidebar() {
   }
 
   return sidebar
+}
+
+function useSidebarWidthStore() {
+  const store = useContext(SidebarWidthContext)
+
+  if (!store) {
+    throw new Error("the sidebar's width needs a SidebarWidthContext provider")
+  }
+
+  return store
+}
+
+/** The reader's width, for what shows it: null is the opening width. */
+export function useSidebarWidth() {
+  const store = useSidebarWidthStore()
+
+  return useSyncExternalStore(store.subscribe, store.get)
+}
+
+/** A ref placing its element by the sidebar, for its `--sidebar-width` and
+    `--sidebar-inset`; `own` is given the element too. */
+export function useSidebarSized<T extends HTMLElement>(own?: RefObject<T | null>) {
+  const store = useSidebarWidthStore()
+
+  return useCallback(
+    (element: T | null) => {
+      if (own) {
+        own.current = element
+      }
+
+      if (!element) {
+        return undefined
+      }
+
+      const release = store.size(element)
+
+      return () => {
+        if (own) {
+          own.current = null
+        }
+
+        release()
+      }
+    },
+    [own, store],
+  )
 }
 
 function useMediaQuery(query: string) {
@@ -81,9 +134,10 @@ export function useSidebarState(): SidebarState {
   const docked = useMediaQuery(`(min-width: ${SIDEBAR_DOCK_MIN_WIDTH}px)`)
   const [open, setOpen] = useState(readStoredSidebarOpen)
   const [panel, setPanelState] = useState(readStoredSidebarPanel)
-  const [width, setWidthState] = useState(readStoredSidebarWidth)
-  const widthRef = useRef(width)
-  const [widenedToHalf, setWidenedToHalf] = useState(0)
+  const [widthStore] = useState(() =>
+    createSidebarWidthStore(readStoredSidebarWidth(), sidebarReservedWidth(docked)),
+  )
+  const [widenListeners] = useState(() => new Set<() => void>())
   // Never stored: a narrow window opens the sidebar over the pages only for
   // the moment it takes to pick one.
   const [peeking, setPeeking] = useState(false)
@@ -112,6 +166,9 @@ export function useSidebarState(): SidebarState {
   }, [])
 
   const reserved = sidebarReservedWidth(docked)
+
+  useLayoutEffect(() => widthStore.setReserved(reserved), [reserved, widthStore])
+
   const setWidth = useCallback(
     (next: number | null, persist = true) => {
       // As the window shows them, each clamped to its room; the opening width
@@ -122,46 +179,60 @@ export function useSidebarState(): SidebarState {
           : clampSidebarWidth(chosen, window.innerWidth, reserved)
       const half = window.innerWidth / 2
 
-      if (docked && shown(widthRef.current) < half && shown(next) >= half) {
-        setWidenedToHalf((count) => count + 1)
-      }
+      const widened = docked && shown(widthStore.get()) < half && shown(next) >= half
 
-      widthRef.current = next
-      setWidthState(next)
+      widthStore.set(next)
+
+      if (widened) {
+        for (const listener of widenListeners) {
+          listener()
+        }
+      }
 
       if (persist) {
         storeSidebarWidth(next)
       }
     },
-    [docked, reserved],
+    [docked, reserved, widenListeners, widthStore],
   )
 
-  const persistWidth = useCallback(() => storeSidebarWidth(widthRef.current), [])
+  const onWidenedToHalf = useCallback(
+    (listener: () => void) => {
+      widenListeners.add(listener)
+
+      return () => {
+        widenListeners.delete(listener)
+      }
+    },
+    [widenListeners],
+  )
+
+  const persistWidth = useCallback(() => storeSidebarWidth(widthStore.get()), [widthStore])
 
   return useMemo(
     () => ({
       dismiss,
       mode,
+      onWidenedToHalf,
       panel,
       persistWidth,
       reserved,
       setPanel,
       setWidth,
       toggle,
-      widenedToHalf,
-      width,
+      widthStore,
     }),
     [
       dismiss,
       mode,
+      onWidenedToHalf,
       panel,
       persistWidth,
       reserved,
       setPanel,
       setWidth,
       toggle,
-      widenedToHalf,
-      width,
+      widthStore,
     ],
   )
 }
